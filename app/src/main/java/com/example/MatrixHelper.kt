@@ -453,7 +453,11 @@ object MatrixHelper {
     }
 
     // Comprehensive Factorizer combining Spectral Matrix calculations and robust prime decomposition
-    fun factorizeSpectral(n: BigInteger, loaded: Map<Int, Array<IntArray>>): SpectralResult {
+    fun factorizeSpectral(
+        n: BigInteger,
+        loaded: Map<Int, Array<IntArray>>,
+        customPrimes: List<BigInteger> = emptyList()
+    ): SpectralResult {
         // 1. Calculate A(N)
         val matrixA = calculateMatrixA(n, loaded)
         val size = matrixA.size
@@ -573,7 +577,7 @@ object MatrixHelper {
         
         val finalFilteredFactors = actualFactors.filter { it > BigInteger.ONE }.distinct()
         val referencePrimes = listOf(BigInteger.valueOf(19), BigInteger.valueOf(113))
-        val allPrimesToAnalyze = (finalFilteredFactors + referencePrimes).distinct().take(4)
+        val allPrimesToAnalyze = (customPrimes + finalFilteredFactors + referencePrimes).distinct()
 
         for (p in allPrimesToAnalyze) {
             val ranks = mutableListOf<Int>()

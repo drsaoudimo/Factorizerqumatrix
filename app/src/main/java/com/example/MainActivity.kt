@@ -45,6 +45,7 @@ import java.math.BigInteger
 
 class FactorizerViewModel : ViewModel() {
     var inputNumber by mutableStateOf("114837291011")
+    var customPrimesText by mutableStateOf("19, 113, 239")
     var isAnalyzing by mutableStateOf(false)
     var spectralResult by mutableStateOf<SpectralResult?>(null)
     var activeTab by mutableStateOf("analyze") // analyze, matrices, history, info
@@ -95,7 +96,16 @@ class FactorizerViewModel : ViewModel() {
 
         isAnalyzing = true
         viewModelScope.launch(Dispatchers.Default) {
-            val res = MatrixHelper.factorizeSpectral(n, loadedMap)
+            val customPrimes = try {
+                customPrimesText.split(",")
+                    .map { it.trim().filter { c -> c.isDigit() } }
+                    .filter { it.isNotEmpty() }
+                    .map { it.toBigInteger() }
+                    .filter { it > BigInteger.ONE }
+            } catch (e: Exception) {
+                emptyList()
+            }
+            val res = MatrixHelper.factorizeSpectral(n, loadedMap, customPrimes)
             withContext(Dispatchers.Main) {
                 spectralResult = res
                 isAnalyzing = false
@@ -394,6 +404,7 @@ fun SettingsDialog(
 fun AnalyzeTab(viewModel: FactorizerViewModel) {
     val context = LocalContext.current
     val result = viewModel.spectralResult
+    var showAllDets by remember { mutableStateOf(false) }
     
     val quickEx = listOf(
         "19", "114", "6236", "114837291011", "9023476901"
@@ -925,6 +936,46 @@ fun AnalyzeTab(viewModel: FactorizerViewModel) {
                             modifier = Modifier.padding(top = 2.dp)
                         )
 
+                        val currentN = try { viewModel.inputNumber.trim().filter { it.isDigit() }.toBigInteger() } catch(e: Exception) { BigInteger.ZERO }
+                        val isGNFactor = result.gN > BigInteger.ONE && result.gN < currentN
+                        val gcdGN_N = result.gN.gcd(currentN)
+                        val isGcdGNFactor = gcdGN_N > BigInteger.ONE && gcdGN_N < currentN
+
+                        if (isGNFactor || isGcdGNFactor) {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(Color(0x1AC084FC), RoundedCornerShape(12.dp))
+                                    .border(BorderStroke(1.dp, Color(0x33C084FC)), RoundedCornerShape(12.dp))
+                                    .padding(12.dp)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.CheckCircle,
+                                        contentDescription = "Factor Found",
+                                        tint = Color(0xFFC084FC),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    val factorMsg = if (isGNFactor) {
+                                        "Potential Factor Identified: G(N) is a non-trivial factor of N (1 < G(N) < N)!"
+                                    } else {
+                                        "Potential Factor Identified: gcd(G(N), N) = $gcdGN_N is a non-trivial factor of N (1 < gcd(G(N), N) < N)!"
+                                    }
+                                    Text(
+                                        text = factorMsg,
+                                        color = Color(0xFFE9D5FF),
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                            }
+                        }
+
                         if (result.gNFactors.isNotEmpty()) {
                             Spacer(modifier = Modifier.height(12.dp))
                             Text(
@@ -972,6 +1023,83 @@ fun AnalyzeTab(viewModel: FactorizerViewModel) {
                             )
                         }
                     }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "INDIVIDUAL SURAH DETERMINANTS D_s(N)",
+                            color = Color(0xFFC7D2FE),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Button(
+                            onClick = { showAllDets = !showAllDets },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0x1F94A3B8),
+                                contentColor = Color.White
+                            ),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            modifier = Modifier.height(28.dp),
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            Text(if (showAllDets) "HIDE DETERMINANTS" else "SHOW ALL (114)", fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    if (showAllDets) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 240.dp)
+                                .verticalScroll(rememberScrollState())
+                                .background(Color(0x0FFFFFFF), RoundedCornerShape(12.dp))
+                                .border(BorderStroke(1.dp, Color(0x12FFFFFF)), RoundedCornerShape(12.dp))
+                                .padding(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            result.individualDets.forEachIndexed { index, d_s ->
+                                val surahNum = index + 1
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(Color(0x0AFFFFFF), RoundedCornerShape(6.dp))
+                                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Surah $surahNum (D_$surahNum)",
+                                        color = Color(0xFFA5B4FC),
+                                        fontSize = 11.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    val dText = d_s.toString()
+                                    val displayedText = if (dText.length > 24) {
+                                        dText.take(10) + "..." + dText.takeLast(10) + " (${dText.length} digits)"
+                                    } else {
+                                        dText
+                                    }
+                                    Text(
+                                        text = displayedText,
+                                        color = Color(0xFFE2E8F0),
+                                        fontSize = 11.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        modifier = Modifier.weight(1f, fill = false),
+                                        overflow = TextOverflow.Ellipsis,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
@@ -1010,6 +1138,60 @@ fun AnalyzeTab(viewModel: FactorizerViewModel) {
                         modifier = Modifier.padding(bottom = 12.dp)
                     )
 
+                    Text(
+                        text = "TEST CUSTOM PRIMES (p):",
+                        color = Color(0xFFF59E0B),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.5.sp,
+                        modifier = Modifier.padding(bottom = 6.dp)
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        TextField(
+                            value = viewModel.customPrimesText,
+                            onValueChange = { viewModel.customPrimesText = it },
+                            placeholder = { Text("e.g. 19, 113, 239", color = Color(0xFF64748B)) },
+                            colors = TextFieldDefaults.colors(
+                                focusedContainerColor = Color(0x19000000),
+                                unfocusedContainerColor = Color(0x0C000000),
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                focusedIndicatorColor = Color.Transparent,
+                                unfocusedIndicatorColor = Color.Transparent
+                            ),
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(12.dp))
+                                .border(BorderStroke(1.dp, Color(0x1EFFFFFF)), RoundedCornerShape(12.dp)),
+                            singleLine = true,
+                            textStyle = LocalTextStyle.current.copy(
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        )
+                        
+                        Spacer(modifier = Modifier.width(8.dp))
+                        
+                        Button(
+                            onClick = { viewModel.analyze(context) },
+                            enabled = !viewModel.isAnalyzing,
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFFF59E0B),
+                                contentColor = Color.Black
+                            ),
+                            modifier = Modifier.height(48.dp)
+                        ) {
+                            Text("RUN", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                        }
+                    }
+
                     if (result.primeRankProfiles.isNotEmpty()) {
                         var selectedPrime by remember(result) {
                             mutableStateOf(result.primeRankProfiles.keys.firstOrNull() ?: "")
@@ -1034,8 +1216,13 @@ fun AnalyzeTab(viewModel: FactorizerViewModel) {
                                         .clickable { selectedPrime = p }
                                         .padding(horizontal = 12.dp, vertical = 6.dp)
                                 ) {
+                                    val buttonText = if (p.length > 15) {
+                                        "p = ${p.take(6)}...${p.takeLast(6)}" + (if (isDivisor) " (Divisor)" else "")
+                                    } else {
+                                        "p = $p" + (if (isDivisor) " (Divisor)" else "")
+                                    }
                                     Text(
-                                        text = "p = $p" + (if (isDivisor) " (Divisor)" else ""),
+                                        text = buttonText,
                                         color = if (isSelected) Color.Black else Color.White,
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold,
@@ -1093,7 +1280,39 @@ fun AnalyzeTab(viewModel: FactorizerViewModel) {
                             }
                         }
 
-                        if (isDivisorOfN) {
+                        val currentN = try { viewModel.inputNumber.trim().filter { it.isDigit() }.toBigInteger() } catch(e: Exception) { BigInteger.ZERO }
+                        val currentP = try { BigInteger(selectedPrime) } catch(e: Exception) { BigInteger.ZERO }
+                        val pDividesN = currentN != BigInteger.ZERO && currentP > BigInteger.ONE && currentN.mod(currentP) == BigInteger.ZERO
+
+                        if (pDividesN) {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(Color(0x1A34D399), RoundedCornerShape(12.dp))
+                                    .border(BorderStroke(1.dp, Color(0x3334D399)), RoundedCornerShape(12.dp))
+                                    .padding(12.dp)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.CheckCircle,
+                                        contentDescription = "Indicator",
+                                        tint = Color(0xFF34D399),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Text(
+                                        text = "Modular Projection Indicator: Prime p = $selectedPrime divides N. The average M_s mod p rank is ${"%.5f".format(avgRank)}/28 (decreased significantly). This indicates a highly confident divisor of N!",
+                                        color = Color(0xFFA7F3D0),
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                            }
+                        } else if (isDivisorOfN) {
                             Spacer(modifier = Modifier.height(10.dp))
                             Box(
                                 modifier = Modifier
@@ -1116,7 +1335,8 @@ fun AnalyzeTab(viewModel: FactorizerViewModel) {
                                         text = "Significant rank drop observed modulo spectral factor p! Average rank reduced below maximum (28.00) confirms non-trivial subspace reductions.",
                                         color = Color(0xFFFDE68A),
                                         fontSize = 10.sp,
-                                        fontWeight = FontWeight.Medium
+                                        fontWeight = FontWeight.Medium,
+                                        modifier = Modifier.weight(1f)
                                     )
                                 }
                             }

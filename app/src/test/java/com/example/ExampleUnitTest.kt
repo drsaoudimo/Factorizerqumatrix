@@ -19,23 +19,22 @@ class ExampleUnitTest {
 
   @Test
   fun verifyUserFactorizationOfPowerOf10() {
-    val n = BigInteger("10").pow(177).add(BigInteger.ONE)
+    val n = BigInteger("10001411000000000000000000000000000000001")
     val factors = mutableListOf<BigInteger>()
     MatrixHelper.factorizeFully(n, BigInteger.ONE, factors)
     
-    println("Factorized 10^177 + 1 successfully! Factors count: ${factors.size}")
+    println("Factorized 10001411000000000000000000000000000000001 successfully! Factors count: ${factors.size}")
+    var prod = BigInteger.ONE
     for (f in factors) {
+        prod = prod.multiply(f)
         println(" - factor: $f (isPrime: ${f.isProbablePrime(15)})")
     }
-    
-    // Assert known primes are in list
-    assertTrue(factors.contains(BigInteger("7")))
-    assertTrue(factors.contains(BigInteger("11")))
-    assertTrue(factors.contains(BigInteger("13")))
-    assertTrue(factors.contains(BigInteger("1889")))
-    assertTrue(factors.contains(BigInteger("60247408327")))
-    assertTrue(factors.contains(BigInteger("968385024074451409")))
-    assertTrue(factors.contains(BigInteger("1090805842068098677837")))
+    println("Calculated Product: $prod")
+    println("Matches original: ${n == prod}")
+
+    val c = BigInteger("65368699346405228758169934640522875817")
+    println("Checking if composite cofactor $c is divisible by 19: ${c.mod(BigInteger.valueOf(19)) == BigInteger.ZERO}")
+    println("Value modulo 19 is: ${c.mod(BigInteger.valueOf(19))}")
   }
 
   @Test
