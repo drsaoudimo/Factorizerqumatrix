@@ -436,6 +436,100 @@ fun AnalyzeTab(viewModel: FactorizerViewModel) {
                             )
                         }
                     }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .background(Color(0x0FFFFFFF), RoundedCornerShape(16.dp))
+                                .border(BorderStroke(1.dp, Color(0x12FFFFFF)), RoundedCornerShape(16.dp))
+                                .padding(12.dp)
+                        ) {
+                            Text(
+                                text = "T(N) SPECTRUM PRODUCT",
+                                color = Color(0xFFA5B4FC),
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            val tNText = result.tN.toString()
+                            Text(
+                                text = tNText,
+                                color = Color(0xFFE2E8F0),
+                                fontSize = 13.sp,
+                                fontFamily = FontFamily.Monospace,
+                                modifier = Modifier.padding(top = 4.dp),
+                                overflow = TextOverflow.Ellipsis,
+                                maxLines = 1
+                            )
+                        }
+                        
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .background(Color(0x0FFFFFFF), RoundedCornerShape(16.dp))
+                                .border(BorderStroke(1.dp, Color(0x12FFFFFF)), RoundedCornerShape(16.dp))
+                                .padding(12.dp)
+                        ) {
+                            Text(
+                                text = "gcd(T(N), N) OVERLAP",
+                                color = Color(0xFFA5B4FC),
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            val gcdText = result.eigenvalueGcd.toString()
+                            Text(
+                                text = gcdText,
+                                color = Color(0xFF34D399),
+                                fontSize = 13.sp,
+                                fontFamily = FontFamily.Monospace,
+                                modifier = Modifier.padding(top = 4.dp),
+                                overflow = TextOverflow.Ellipsis,
+                                maxLines = 1
+                            )
+                        }
+                    }
+
+                    if (result.eigenvaluesReal.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        
+                        Text(
+                            text = "LEADING MATRIX EIGENVALUES (λ_i):",
+                            color = Color(0xFF64748B),
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.5.sp
+                        )
+                        
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            for (i in 0 until minOf(4, result.eigenvaluesReal.size)) {
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .background(Color(0x0BFFFFFF), RoundedCornerShape(8.dp))
+                                        .border(BorderStroke(1.dp, Color(0x0AFFFFFF)), RoundedCornerShape(8.dp))
+                                        .padding(vertical = 6.dp, horizontal = 4.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = String.format("%.2f", result.eigenvaluesReal[i]),
+                                        color = Color(0xFFCBD5E1),
+                                        fontSize = 11.sp,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
