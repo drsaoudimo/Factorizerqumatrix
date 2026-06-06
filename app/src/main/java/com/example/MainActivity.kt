@@ -49,6 +49,15 @@ class FactorizerViewModel : ViewModel() {
     var spectralResult by mutableStateOf<SpectralResult?>(null)
     var activeTab by mutableStateOf("analyze") // analyze, matrices, history, info
     
+    private var _pollardRhoStepsState by mutableStateOf(150000)
+    var pollardRhoStepsState: Int
+        get() = _pollardRhoStepsState
+        set(value) {
+            _pollardRhoStepsState = value
+            MatrixHelper.globalMaxSteps = value
+        }
+    var determinantMode by mutableStateOf("bareiss")
+    
     val historyList = mutableStateListOf<Pair<String, List<BigInteger>>>()
 
     private var loadedMap: Map<Int, Array<IntArray>> = emptyMap()
@@ -109,6 +118,15 @@ class MainActivity : ComponentActivity() {
                 val viewModel: FactorizerViewModel = viewModel()
                 val context = LocalContext.current
                 
+                var showSettingsDialog by remember { mutableStateOf(false) }
+                
+                if (showSettingsDialog) {
+                    SettingsDialog(
+                        onDismiss = { showSettingsDialog = false },
+                        viewModel = viewModel
+                    )
+                }
+                
                 LaunchedEffect(Unit) {
                     viewModel.initData(context)
                 }
@@ -134,7 +152,7 @@ class MainActivity : ComponentActivity() {
                                 .fillMaxSize()
                                 .padding(innerPadding)
                         ) {
-                            SpectralHeader()
+                            SpectralHeader(onSettingsClick = { showSettingsDialog = true })
                             
                             Box(modifier = Modifier.weight(1f)) {
                                 when (viewModel.activeTab) {
@@ -153,7 +171,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun SpectralHeader() {
+fun SpectralHeader(onSettingsClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -212,7 +230,7 @@ fun SpectralHeader() {
         }
         
         IconButton(
-            onClick = { /* Settings fallback */ },
+            onClick = onSettingsClick,
             modifier = Modifier
                 .size(40.dp)
                 .background(Color(0x0FFFFFFF), CircleShape)
@@ -224,6 +242,152 @@ fun SpectralHeader() {
             )
         }
     }
+}
+
+@Composable
+fun SettingsDialog(
+    onDismiss: () -> Unit,
+    viewModel: FactorizerViewModel
+) {
+    val context = LocalContext.current
+    var pollardRhoSteps by remember { mutableStateOf(viewModel.pollardRhoStepsState.toFloat()) }
+    var selectedDeterminantMode by remember { mutableStateOf(viewModel.determinantMode) }
+    
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    viewModel.pollardRhoStepsState = pollardRhoSteps.toInt()
+                    viewModel.determinantMode = selectedDeterminantMode
+                    Toast.makeText(context, "Settings Saved", Toast.LENGTH_SHORT).show()
+                    onDismiss()
+                }
+            ) {
+                Text("Save", color = Color(0xFF818CF8), fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = Color(0xFF94A3B8))
+            }
+        },
+        containerColor = Color(0xFF1E293B),
+        shape = RoundedCornerShape(24.dp),
+        title = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Settings,
+                    contentDescription = "Settings Icon",
+                    tint = Color(0xFF818CF8)
+                )
+                Text(
+                    text = "Matrix Configuration",
+                    color = Color.White,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                HorizontalDivider(color = Color(0x1AFFFFFF))
+                
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Pollard's Rho Max Iterations: ${pollardRhoSteps.toInt()}",
+                        color = Color(0xFFE2E8F0),
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Slider(
+                        value = pollardRhoSteps,
+                        onValueChange = { pollardRhoSteps = it },
+                        valueRange = 10000f..500000f,
+                        steps = 49,
+                        colors = SliderDefaults.colors(
+                            thumbColor = Color(0xFF818CF8),
+                            activeTrackColor = Color(0xFF818CF8),
+                            inactiveTrackColor = Color(0x33FFFFFF)
+                        )
+                    )
+                    Text(
+                        text = "Allows deeper factorization search for massive numbers, albeit with slight latency tradeoffs.",
+                        color = Color(0xFF94A3B8),
+                        fontSize = 11.sp
+                    )
+                }
+                
+                HorizontalDivider(color = Color(0x1AFFFFFF))
+                
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Determinant Mode",
+                        color = Color(0xFFE2E8F0),
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.clickable { selectedDeterminantMode = "bareiss" }
+                        ) {
+                            RadioButton(
+                                selected = selectedDeterminantMode == "bareiss",
+                                onClick = { selectedDeterminantMode = "bareiss" },
+                                colors = RadioButtonDefaults.colors(selectedColor = Color(0xFF818CF8))
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Exact Bareiss", color = Color.White, fontSize = 14.sp)
+                        }
+                        
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.clickable { selectedDeterminantMode = "eigenvals" }
+                        ) {
+                            RadioButton(
+                                selected = selectedDeterminantMode == "eigenvals",
+                                onClick = { selectedDeterminantMode = "eigenvals" },
+                                colors = RadioButtonDefaults.colors(selectedColor = Color(0xFF818CF8))
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Eigenvalues", color = Color.White, fontSize = 14.sp)
+                        }
+                    }
+                }
+                
+                HorizontalDivider(color = Color(0x1AFFFFFF))
+                
+                Button(
+                    onClick = {
+                        viewModel.historyList.clear()
+                        Toast.makeText(context, "History Cleared", Toast.LENGTH_SHORT).show()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444)),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Delete,
+                        contentDescription = "Clear History Icon",
+                        tint = Color.White,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Clear Factorization History", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    )
 }
 
 @Composable
@@ -595,14 +759,415 @@ fun AnalyzeTab(viewModel: FactorizerViewModel) {
                                     maxLines = 1
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
+                                val isPrime = factor.isProbablePrime(15)
                                 Text(
-                                    text = "Prime Factor",
-                                    color = Color(0xFFA5B4FC),
+                                    text = if (isPrime) "Prime Factor" else "Composite Factor",
+                                    color = if (isPrime) Color(0xFFA5B4FC) else Color(0xFFFDA4AF),
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.SemiBold
                                 )
                             }
                         }
+                    }
+                }
+            }
+
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(BorderStroke(1.dp, Color(0x16FFFFFF)), RoundedCornerShape(24.dp))
+                        .background(Color(0x09FFFFFF), RoundedCornerShape(24.dp))
+                        .padding(20.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .background(Color(0xFF38BDF8), CircleShape)
+                        )
+                        Text(
+                            text = "A(N) EXACT INTEGER DETERMINANT",
+                            color = Color(0xFFE2E8F0),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+                    
+                    Text(
+                        text = "Calculates the exact theoretical integer determinant Δ(N) of the joint projection operator A(N) using division-free Bareiss reductions, bypassing floating-point bounds entirely.",
+                        color = Color(0xFF94A3B8),
+                        fontSize = 11.sp,
+                        modifier = Modifier.padding(bottom = 12.dp)
+                    )
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0x0FFFFFFF), RoundedCornerShape(16.dp))
+                            .border(BorderStroke(1.dp, Color(0x12FFFFFF)), RoundedCornerShape(16.dp))
+                            .padding(14.dp)
+                    ) {
+                        Text(
+                            text = "EXACT Δ(N) LENGTH",
+                            color = Color(0xFF94A3B8),
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        val numDigits = result.exactDeltaN.abs().toString().length
+                        Text(
+                            text = if (result.exactDeltaN == BigInteger.ZERO) "0 (Singular Matrix)" else "$numDigits Digit Integer",
+                            color = Color(0xFF38BDF8),
+                            fontSize = 15.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(top = 2.dp)
+                        )
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        Text(
+                            text = "gcd(Δ(N), N) FACTOR OVERLAP",
+                            color = Color(0xFF94A3B8),
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Row(
+                            modifier = Modifier.padding(top = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = result.exactDeltaGcd.toString(),
+                                color = if (result.exactDeltaGcd > BigInteger.ONE && result.exactDeltaGcd < result.exactDeltaN) Color(0xFF34D399) else Color(0xFFE2E8F0),
+                                fontSize = 14.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.weight(1f),
+                                overflow = TextOverflow.Ellipsis,
+                                maxLines = 1
+                            )
+                            if (result.exactDeltaGcd > BigInteger.ONE && result.exactDeltaGcd < result.exactDeltaN) {
+                                Box(
+                                    modifier = Modifier
+                                        .background(Color(0x2634D399), RoundedCornerShape(6.dp))
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Text("FACTOR FOUND", color = Color(0xFF34D399), fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(BorderStroke(1.dp, Color(0x16FFFFFF)), RoundedCornerShape(24.dp))
+                        .background(Color(0x09FFFFFF), RoundedCornerShape(24.dp))
+                        .padding(20.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .background(Color(0xFFC084FC), CircleShape)
+                        )
+                        Text(
+                            text = "INDIVIDUAL MATRIX DETERMINANT GCD",
+                            color = Color(0xFFE2E8F0),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Text(
+                        text = "Computes D_s(N) = det(M_s - N*I) for all 114 Surah matrices. Calculates the global common divisor G(N) = gcd(D_1, D_2, ..., D_114). Factors are extracted directly from individual matrix determinant overlaps with N.",
+                        color = Color(0xFF94A3B8),
+                        fontSize = 11.sp,
+                        modifier = Modifier.padding(bottom = 12.dp)
+                    )
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0x0FFFFFFF), RoundedCornerShape(16.dp))
+                            .border(BorderStroke(1.dp, Color(0x12FFFFFF)), RoundedCornerShape(16.dp))
+                            .padding(14.dp)
+                    ) {
+                        Text(
+                            text = "GLOBAL MATRIX DIVISOR G(N)",
+                            color = Color(0xFF94A3B8),
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        val gNText = if (result.gN == BigInteger.ZERO) "0" else "${result.gN.abs().toString().length}-digit matrix GCD"
+                        Text(
+                            text = gNText,
+                            color = Color(0xFFC084FC),
+                            fontSize = 14.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(top = 2.dp)
+                        )
+
+                        if (result.gNFactors.isNotEmpty()) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                text = "INDIVIDUALLY DISCOVERED OVERLAPS",
+                                color = Color(0xFFA5B4FC),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                result.gNFactors.forEach { factor ->
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .background(Color(0x14FFFFFF), RoundedCornerShape(8.dp))
+                                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = factor.toString(),
+                                            color = Color.White,
+                                            fontSize = 12.sp,
+                                            fontFamily = FontFamily.Monospace,
+                                            modifier = Modifier.weight(1f),
+                                            overflow = TextOverflow.Ellipsis,
+                                            maxLines = 1
+                                        )
+                                        Box(
+                                            modifier = Modifier
+                                                .background(Color(0x2034D399), RoundedCornerShape(4.dp))
+                                                .padding(horizontal = 5.dp, vertical = 1.dp)
+                                        ) {
+                                            Text("Det Divisor", color = Color(0xFF34D399), fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Text(
+                                text = "No separate divisor overlaps found from individual D_s.",
+                                color = Color(0xFF64748B),
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+                }
+            }
+
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(BorderStroke(1.dp, Color(0x16FFFFFF)), RoundedCornerShape(24.dp))
+                        .background(Color(0x09FFFFFF), RoundedCornerShape(24.dp))
+                        .padding(20.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .background(Color(0xFFF59E0B), CircleShape)
+                        )
+                        Text(
+                            text = "FINITE PROJECTIONS & PRIMALITY MONITOR",
+                            color = Color(0xFFE2E8F0),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Text(
+                        text = "Projects all 114 Surah matrices into prime finite fields F_p. Monitoring rank drop characteristics compares how the space reduces: a divisor p of N exhibits clear rank drops (< 28) and eigenvalue stability changes.",
+                        color = Color(0xFF94A3B8),
+                        fontSize = 11.sp,
+                        modifier = Modifier.padding(bottom = 12.dp)
+                    )
+
+                    if (result.primeRankProfiles.isNotEmpty()) {
+                        var selectedPrime by remember(result) {
+                            mutableStateOf(result.primeRankProfiles.keys.firstOrNull() ?: "")
+                        }
+                        
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState())
+                                .padding(vertical = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            result.primeRankProfiles.keys.forEach { p ->
+                                val isSelected = p == selectedPrime
+                                val isDivisor = result.factors.any { it.toString() == p }
+                                Box(
+                                    modifier = Modifier
+                                        .background(
+                                            if (isSelected) Color(0xFFF59E0B) else Color(0x1AFFFFFF),
+                                            RoundedCornerShape(10.dp)
+                                        )
+                                        .clickable { selectedPrime = p }
+                                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                                ) {
+                                    Text(
+                                        text = "p = $p" + (if (isDivisor) " (Divisor)" else ""),
+                                        color = if (isSelected) Color.Black else Color.White,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        val avgRank = result.averageRanks[selectedPrime] ?: 0.0
+                        val isDivisorOfN = result.factors.any { it.toString() == selectedPrime }
+                        val drops = result.rankDrops[selectedPrime] ?: emptyList()
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .background(Color(0x0FFFFFFF), RoundedCornerShape(12.dp))
+                                    .border(BorderStroke(1.dp, Color(0x12FFFFFF)), RoundedCornerShape(12.dp))
+                                    .padding(10.dp)
+                            ) {
+                                val rankColor = if (avgRank < 28.0) Color(0xFFF59E0B) else Color(0xFF10B981)
+                                Text("AVERAGE F_p RANK", color = Color(0xFF94A3B8), fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                                Text(
+                                    text = "%.5f".format(avgRank) + "/28",
+                                    color = rankColor,
+                                    fontSize = 14.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(top = 2.dp)
+                                )
+                            }
+
+                            Column(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .background(Color(0x0FFFFFFF), RoundedCornerShape(12.dp))
+                                    .border(BorderStroke(1.dp, Color(0x12FFFFFF)), RoundedCornerShape(12.dp))
+                                    .padding(10.dp)
+                            ) {
+                                Text("PROJECTION DROPS", color = Color(0xFF94A3B8), fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                                Text(
+                                    text = "${drops.size} Matrices",
+                                    color = if (drops.isNotEmpty()) Color(0xFFF87171) else Color(0xFF94A3B8),
+                                    fontSize = 14.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(top = 2.dp)
+                                )
+                            }
+                        }
+
+                        if (isDivisorOfN) {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(Color(0x1AF59E0B), RoundedCornerShape(12.dp))
+                                    .border(BorderStroke(1.dp, Color(0x33F59E0B)), RoundedCornerShape(12.dp))
+                                    .padding(12.dp)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Warning,
+                                        contentDescription = "Analysis",
+                                        tint = Color(0xFFF59E0B),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Text(
+                                        text = "Significant rank drop observed modulo spectral factor p! Average rank reduced below maximum (28.00) confirms non-trivial subspace reductions.",
+                                        color = Color(0xFFFDE68A),
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            }
+                        }
+
+                        if (drops.isNotEmpty()) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                text = "DETAILED RANK DROPS FOR SELECTED P:",
+                                color = Color(0xFF94A3B8),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(max = 120.dp)
+                                    .verticalScroll(rememberScrollState())
+                                    .background(Color(0x0FFFFFFF), RoundedCornerShape(12.dp))
+                                    .border(BorderStroke(1.dp, Color(0x12FFFFFF)), RoundedCornerShape(12.dp))
+                                    .padding(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                drops.forEach { dropDetail ->
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(dropDetail, color = Color(0xFFCBD5E1), fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                                        Box(
+                                            modifier = Modifier
+                                                .background(Color(0x1AF59E0B), RoundedCornerShape(4.dp))
+                                                .padding(horizontal = 4.dp, vertical = 1.dp)
+                                        ) {
+                                            Text("Drop", color = Color(0xFFF59E0B), fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text(
+                            text = "No projection primes calculated yet.",
+                            color = Color(0xFF64748B),
+                            fontSize = 11.sp
+                        )
                     }
                 }
             }

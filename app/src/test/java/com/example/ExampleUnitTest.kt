@@ -18,6 +18,27 @@ class ExampleUnitTest {
   }
 
   @Test
+  fun verifyUserFactorizationOfPowerOf10() {
+    val n = BigInteger("10").pow(177).add(BigInteger.ONE)
+    val factors = mutableListOf<BigInteger>()
+    MatrixHelper.factorizeFully(n, BigInteger.ONE, factors)
+    
+    println("Factorized 10^177 + 1 successfully! Factors count: ${factors.size}")
+    for (f in factors) {
+        println(" - factor: $f (isPrime: ${f.isProbablePrime(15)})")
+    }
+    
+    // Assert known primes are in list
+    assertTrue(factors.contains(BigInteger("7")))
+    assertTrue(factors.contains(BigInteger("11")))
+    assertTrue(factors.contains(BigInteger("13")))
+    assertTrue(factors.contains(BigInteger("1889")))
+    assertTrue(factors.contains(BigInteger("60247408327")))
+    assertTrue(factors.contains(BigInteger("968385024074451409")))
+    assertTrue(factors.contains(BigInteger("1090805842068098677837")))
+  }
+
+  @Test
   fun testFactorizeLargeNumberAndVerifyPrimes() {
     val largeNumberStr = "796559576193775931841242891093" +
                          "796559576193775931841242891093" +
