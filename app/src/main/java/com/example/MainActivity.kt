@@ -5,44 +5,47 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
-import androidx.compose.animation.*
-import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.Book
+import androidx.compose.material.icons.outlined.Calculate
+import androidx.compose.material.icons.outlined.GridOn
+import androidx.compose.material.icons.outlined.History
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.example.ui.theme.MyApplicationTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.math.BigInteger
 
+// ViewModel managing Spectral Matrices Factorization state
 class FactorizerViewModel : ViewModel() {
     var inputNumber by mutableStateOf("114837291011")
     var customPrimesText by mutableStateOf("19, 113, 239")
@@ -50,52 +53,40 @@ class FactorizerViewModel : ViewModel() {
     var spectralResult by mutableStateOf<SpectralResult?>(null)
     var activeTab by mutableStateOf("analyze") // analyze, matrices, history, info
     
-    private var _pollardRhoStepsState by mutableStateOf(150000)
-    var pollardRhoStepsState: Int
-        get() = _pollardRhoStepsState
-        set(value) {
-            _pollardRhoStepsState = value
-            MatrixHelper.globalMaxSteps = value
-        }
-    var determinantMode by mutableStateOf("bareiss")
-    
-    val historyList = mutableStateListOf<Pair<String, List<BigInteger>>>()
+    // History log of analyzed values N and their discovered factors
+    val historyLog = mutableStateListOf<Pair<String, List<BigInteger>>>()
 
-    private var loadedMap: Map<Int, Array<IntArray>> = emptyMap()
-
-    fun initData(context: Context) {
-        if (loadedMap.isNotEmpty()) return
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val jsonString = context.resources.openRawResource(R.raw.matrices).use { stream ->
-                    stream.bufferedReader().use { it.readText() }
-                }
-                loadedMap = MatrixHelper.loadMatrices(jsonString)
-                analyze(context, silent = true)
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
-        }
-    }
-
-    fun analyze(context: Context, silent: Boolean = false) {
+    fun analyze(context: Context, isArabic: Boolean, silent: Boolean = false) {
         val nStr = inputNumber.trim().filter { it.isDigit() }
         if (nStr.isEmpty()) {
             if (!silent) {
-                Toast.makeText(context, "Please enter a valid positive number", Toast.LENGTH_SHORT).show()
+                val msg = if (isArabic) "يرجى إدخال عدد صحيح موجب" else "Please enter a valid positive number"
+                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
             }
             return
         }
-        val n = nStr.toBigInteger()
+
+        val n = try {
+            BigInteger(nStr)
+        } catch (e: Exception) {
+            if (!silent) {
+                val msg = if (isArabic) "العدد غير صالح" else "Invalid number"
+                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+            }
+            return
+        }
+
         if (n <= BigInteger.ONE) {
             if (!silent) {
-                Toast.makeText(context, "Please enter a number greater than 1", Toast.LENGTH_SHORT).show()
+                val msg = if (isArabic) "يرجى إدخال عدد أكبر من 1" else "Please enter a number greater than 1"
+                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
             }
             return
         }
 
         isAnalyzing = true
-        viewModelScope.launch(Dispatchers.Default) {
+        // Launch mathematical factorization in background thread
+        kotlinx.coroutines.GlobalScope.launch(Dispatchers.Default) {
             val customPrimes = try {
                 customPrimesText.split(",")
                     .map { it.trim().filter { c -> c.isDigit() } }
@@ -105,14 +96,21 @@ class FactorizerViewModel : ViewModel() {
             } catch (e: Exception) {
                 emptyList()
             }
-            val res = MatrixHelper.factorizeSpectral(n, loadedMap, customPrimes)
+
+            val res = MatrixHelper.factorizeSpectral(n, emptyMap(), customPrimes)
+            
             withContext(Dispatchers.Main) {
                 spectralResult = res
                 isAnalyzing = false
+                
+                // Add to history if not duplicate
+                if (historyLog.none { it.first == nStr }) {
+                    historyLog.add(0, Pair(nStr, res.factors))
+                }
+                
                 if (!silent) {
-                    if (historyList.none { it.first == nStr }) {
-                        historyList.add(0, Pair(nStr, res.factors))
-                    }
+                    val msg = if (isArabic) "اكتمل التحليل المصفوفي الطيفي!" else "Spectral matrix analysis completed!"
+                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -122,1272 +120,453 @@ class FactorizerViewModel : ViewModel() {
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
         setContent {
-            MyApplicationTheme {
-                val viewModel: FactorizerViewModel = viewModel()
-                val context = LocalContext.current
-                
-                var showSettingsDialog by remember { mutableStateOf(false) }
-                
-                if (showSettingsDialog) {
-                    SettingsDialog(
-                        onDismiss = { showSettingsDialog = false },
-                        viewModel = viewModel
-                    )
-                }
-                
-                LaunchedEffect(Unit) {
-                    viewModel.initData(context)
-                }
+            var isArabic by rememberSaveable { mutableStateOf(true) }
 
+            MaterialTheme(
+                colorScheme = darkColorScheme(
+                    primary = Color(0xFFC084FC),
+                    secondary = Color(0xFFF59E0B),
+                    background = Color(0xFF0F172A),
+                    surface = Color(0x13FFFFFF)
+                )
+            ) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = Color(0xFF0F172A)
                 ) {
-                    Scaffold(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .navigationBarsPadding(),
-                        bottomBar = {
-                            GlassBottomNav(
-                                activeTab = viewModel.activeTab,
-                                onTabSelected = { viewModel.activeTab = it }
-                            )
-                        },
-                        containerColor = Color.Transparent
-                    ) { innerPadding ->
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(innerPadding)
-                        ) {
-                            SpectralHeader(onSettingsClick = { showSettingsDialog = true })
-                            
-                            Box(modifier = Modifier.weight(1f)) {
-                                when (viewModel.activeTab) {
-                                    "analyze" -> AnalyzeTab(viewModel)
-                                    "matrices" -> MatricesTab(viewModel)
-                                    "history" -> HistoryTab(viewModel)
-                                    "info" -> InfoTab()
-                                }
-                            }
-                        }
-                    }
+                    val fViewModel: FactorizerViewModel = viewModel()
+                    MainLayout(
+                        viewModel = fViewModel,
+                        isArabic = isArabic,
+                        onLanguageToggle = { isArabic = !isArabic }
+                    )
                 }
             }
         }
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SpectralHeader(onSettingsClick: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .drawBehind {
-                drawLine(
-                    color = Color(0x10FFFFFF),
-                    start = Offset(0f, size.height),
-                    end = Offset(size.width, size.height),
-                    strokeWidth = 1.dp.toPx()
-                )
-            }
-            .background(Color(0x1A0F1728))
-            .statusBarsPadding()
-            .padding(horizontal = 20.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(42.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(
-                        Brush.linearGradient(
-                            colors = listOf(Color(0xFF6366F1), Color(0xFF9333EA))
+fun MainLayout(
+    viewModel: FactorizerViewModel,
+    isArabic: Boolean,
+    onLanguageToggle: () -> Unit
+) {
+    val activeTab = viewModel.activeTab
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text(
+                        text = if (isArabic) "محلل العوامل المصفوفي الطيفي" else "Spectral Matrix Factorizer",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                },
+                actions = {
+                    IconButton(onClick = onLanguageToggle) {
+                        Text(
+                            text = if (isArabic) "EN" else "عربي",
+                            color = Color(0xFFC084FC),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp
                         )
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Home,
-                    contentDescription = "Matrix Logo",
-                    tint = Color.White,
-                    modifier = Modifier.size(24.dp)
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color(0xFF0F172A),
+                    titleContentColor = Color.White
                 )
-            }
-            Column {
-                Text(
-                    text = "Spectral Prime",
-                    color = Color(0xFFF1F5F9),
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = (-0.5).sp
-                )
-                Text(
-                    text = "QURANIC MATRIX V4.0",
-                    color = Color(0xFFA5B4FC),
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    letterSpacing = 1.sp
-                )
-            }
-        }
-        
-        IconButton(
-            onClick = onSettingsClick,
-            modifier = Modifier
-                .size(40.dp)
-                .background(Color(0x0FFFFFFF), CircleShape)
-        ) {
-            Icon(
-                imageVector = Icons.Default.Settings,
-                contentDescription = "Settings",
-                tint = Color(0xFF94A3B8)
+            )
+        },
+        bottomBar = {
+            GlassBottomNav(
+                activeTab = activeTab,
+                onTabSelected = { viewModel.activeTab = it },
+                isArabic = isArabic
             )
         }
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(Color(0xFF0F172A), Color(0xFF080D1A))
+                    )
+                )
+        ) {
+            // Main tab layouts with footer embedded to ensure visibility on all paths
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+            ) {
+                when (activeTab) {
+                    "analyze" -> AnalyzeTab(viewModel, isArabic)
+                    "matrices" -> MatricesTab(isArabic)
+                    "history" -> HistoryTab(viewModel, isArabic)
+                    "info" -> InformationTab(isArabic)
+                }
+            }
+
+            // Dr. Saoudi Mohamed Copyright Footer (Mandatory across all tabs)
+            FooterLayout(isArabic)
+        }
     }
 }
 
 @Composable
-fun SettingsDialog(
-    onDismiss: () -> Unit,
-    viewModel: FactorizerViewModel
-) {
-    val context = LocalContext.current
-    var pollardRhoSteps by remember { mutableStateOf(viewModel.pollardRhoStepsState.toFloat()) }
-    var selectedDeterminantMode by remember { mutableStateOf(viewModel.determinantMode) }
-    
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        confirmButton = {
-            TextButton(
-                onClick = {
-                    viewModel.pollardRhoStepsState = pollardRhoSteps.toInt()
-                    viewModel.determinantMode = selectedDeterminantMode
-                    Toast.makeText(context, "Settings Saved", Toast.LENGTH_SHORT).show()
-                    onDismiss()
-                }
-            ) {
-                Text("Save", color = Color(0xFF818CF8), fontWeight = FontWeight.Bold)
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel", color = Color(0xFF94A3B8))
-            }
-        },
-        containerColor = Color(0xFF1E293B),
-        shape = RoundedCornerShape(24.dp),
-        title = {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Settings,
-                    contentDescription = "Settings Icon",
-                    tint = Color(0xFF818CF8)
-                )
-                Text(
-                    text = "Matrix Configuration",
-                    color = Color.White,
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-        },
-        text = {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                HorizontalDivider(color = Color(0x1AFFFFFF))
-                
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        text = "Pollard's Rho Max Iterations: ${pollardRhoSteps.toInt()}",
-                        color = Color(0xFFE2E8F0),
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                    Slider(
-                        value = pollardRhoSteps,
-                        onValueChange = { pollardRhoSteps = it },
-                        valueRange = 10000f..500000f,
-                        steps = 49,
-                        colors = SliderDefaults.colors(
-                            thumbColor = Color(0xFF818CF8),
-                            activeTrackColor = Color(0xFF818CF8),
-                            inactiveTrackColor = Color(0x33FFFFFF)
-                        )
-                    )
-                    Text(
-                        text = "Allows deeper factorization search for massive numbers, albeit with slight latency tradeoffs.",
-                        color = Color(0xFF94A3B8),
-                        fontSize = 11.sp
-                    )
-                }
-                
-                HorizontalDivider(color = Color(0x1AFFFFFF))
-                
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        text = "Determinant Mode",
-                        color = Color(0xFFE2E8F0),
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(16.dp)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.clickable { selectedDeterminantMode = "bareiss" }
-                        ) {
-                            RadioButton(
-                                selected = selectedDeterminantMode == "bareiss",
-                                onClick = { selectedDeterminantMode = "bareiss" },
-                                colors = RadioButtonDefaults.colors(selectedColor = Color(0xFF818CF8))
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Exact Bareiss", color = Color.White, fontSize = 14.sp)
-                        }
-                        
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.clickable { selectedDeterminantMode = "eigenvals" }
-                        ) {
-                            RadioButton(
-                                selected = selectedDeterminantMode == "eigenvals",
-                                onClick = { selectedDeterminantMode = "eigenvals" },
-                                colors = RadioButtonDefaults.colors(selectedColor = Color(0xFF818CF8))
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Eigenvalues", color = Color.White, fontSize = 14.sp)
-                        }
-                    }
-                }
-                
-                HorizontalDivider(color = Color(0x1AFFFFFF))
-                
-                Button(
-                    onClick = {
-                        viewModel.historyList.clear()
-                        Toast.makeText(context, "History Cleared", Toast.LENGTH_SHORT).show()
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444)),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Delete,
-                        contentDescription = "Clear History Icon",
-                        tint = Color.White,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Clear Factorization History", color = Color.White, fontWeight = FontWeight.Bold)
-                }
-            }
-        }
-    )
-}
-
-@Composable
-fun AnalyzeTab(viewModel: FactorizerViewModel) {
+fun AnalyzeTab(viewModel: FactorizerViewModel, isArabic: Boolean) {
     val context = LocalContext.current
     val result = viewModel.spectralResult
     var showAllDets by remember { mutableStateOf(false) }
-    
-    val quickEx = listOf(
-        "19", "114", "6236", "114837291011", "9023476901"
-    )
+
+    val quickExamples = listOf("19", "114", "6236", "114837291011", "9023476901")
 
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(vertical = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+        contentPadding = PaddingValues(bottom = 24.dp, top = 8.dp)
     ) {
+        // Welcome and Input Card
         item {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .border(BorderStroke(1.dp, Color(0x1EFFFFFF)), RoundedCornerShape(24.dp))
-                    .background(Color(0x09FFFFFF), RoundedCornerShape(24.dp))
-                    .padding(20.dp)
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0x13FFFFFF)),
+                border = BorderStroke(1.dp, Color(0x22FFFFFF)),
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Text(
-                    text = "TARGET NUMBER (N)",
-                    color = Color(0xFF94A3B8),
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 1.sp,
-                    modifier = Modifier.padding(bottom = 8.dp)
-                )
-                
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    TextField(
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = if (isArabic) "تحليل العوامل الطيفي للعدد N" else "Spectral Factorization of Number N",
+                        color = Color.White,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = if (isArabic) 
+                            "يقوم هذا المحلل برسم مصفوفة الأبعاد الـ 114 للقرآن الكريم ويبحث عن العوامل المشتركة بالاعتماد على المحددات والقيم الطيفية."
+                            else "This analyzer constructs the 114 Quranic matrices and computes determinants, eigenvalues, and rank drop projection to find factors.",
+                        color = Color(0xFF94A3B8),
+                        fontSize = 12.sp,
+                        lineHeight = 16.sp
+                    )
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // TextField N Input
+                    OutlinedTextField(
                         value = viewModel.inputNumber,
                         onValueChange = { viewModel.inputNumber = it.filter { c -> c.isDigit() } },
-                        placeholder = { Text("Enter integer...", color = Color(0xFF64748B)) },
-                        colors = TextFieldDefaults.colors(
-                            focusedContainerColor = Color(0x260F172A),
-                            unfocusedContainerColor = Color(0x130F172A),
+                        label = { Text(if (isArabic) "أدخل العدد N المراد تحليله" else "Enter Number N") },
+                        placeholder = { Text("e.g. 114837291011") },
+                        colors = OutlinedTextFieldDefaults.colors(
                             focusedTextColor = Color(0xFFA5B4FC),
-                            unfocusedTextColor = Color(0xFFA5B4FC),
-                            focusedIndicatorColor = Color.Transparent,
-                            unfocusedIndicatorColor = Color.Transparent
+                            focusedBorderColor = Color(0xFFC084FC),
+                            unfocusedBorderColor = Color(0x33FFFFFF)
                         ),
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(16.dp))
-                            .border(BorderStroke(1.dp, Color(0x14FFFFFF)), RoundedCornerShape(16.dp)),
                         singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        textStyle = LocalTextStyle.current.copy(
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold
-                        )
+                        modifier = Modifier.fillMaxWidth()
                     )
-                    
-                    Spacer(modifier = Modifier.width(12.dp))
-                    
-                    Button(
-                        onClick = { viewModel.analyze(context) },
-                        enabled = !viewModel.isAnalyzing,
-                        shape = RoundedCornerShape(16.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFF4F46E5)
-                        ),
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Quick Examples Flow
+                    Text(
+                        text = if (isArabic) "أمثلة سريعة للأعداد N:" else "Quick N Examples:",
+                        color = Color(0xFF64748B),
+                        fontSize = 12.sp
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(
                         modifier = Modifier
-                            .height(56.dp)
-                            .animateContentSize()
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        quickExamples.forEach { ex ->
+                            Box(
+                                modifier = Modifier
+                                    .background(Color(0x12FFFFFF), RoundedCornerShape(8.dp))
+                                    .clickable {
+                                        viewModel.inputNumber = ex
+                                        viewModel.analyze(context, isArabic)
+                                    }
+                                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                            ) {
+                                Text(
+                                    text = ex,
+                                    color = Color(0xFFCBD5E1),
+                                    fontSize = 11.sp,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Factorization Action Trigger Button
+                    Button(
+                        onClick = { viewModel.analyze(context, isArabic) },
+                        enabled = !viewModel.isAnalyzing,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFFC084FC),
+                            contentColor = Color.Black
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
                         if (viewModel.isAnalyzing) {
                             CircularProgressIndicator(
+                                color = Color.Black,
                                 modifier = Modifier.size(20.dp),
-                                color = Color.White,
                                 strokeWidth = 2.dp
                             )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                if (isArabic) "جاري الاحتساب وحل المعادلات..." else "Calculating & Reducing Matrices...",
+                                fontWeight = FontWeight.Bold
+                            )
                         } else {
-                            Text("ANALYZE", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(14.dp))
-                Text(
-                    text = "Quick Candidates:",
-                    color = Color(0xFF64748B),
-                    fontSize = 12.sp,
-                    modifier = Modifier.padding(bottom = 6.dp)
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    quickEx.forEach { ex ->
-                        Box(
-                            modifier = Modifier
-                                .background(Color(0x12FFFFFF), RoundedCornerShape(8.dp))
-                                .clickable {
-                                    viewModel.inputNumber = ex
-                                    viewModel.analyze(context)
-                                }
-                                .padding(horizontal = 10.dp, vertical = 6.dp)
-                        ) {
-                            Text(ex, color = Color(0xFFCBD5E1), fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                            Icon(Icons.Default.PlayArrow, contentDescription = "Run", tint = Color.Black)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                if (isArabic) "بدء التحليل الطيفي والمحددات" else "Execute Spectral Determinants Analysis",
+                                fontWeight = FontWeight.Bold
+                            )
                         }
                     }
                 }
             }
         }
 
+        // Display results if analysis is available
         if (result != null) {
+            // Factor Output Card with Copy prime factors button
             item {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .border(BorderStroke(1.dp, Color(0x16FFFFFF)), RoundedCornerShape(24.dp))
-                        .background(Color(0x09FFFFFF), RoundedCornerShape(24.dp))
-                        .padding(20.dp)
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0x1A8B5CF6)),
+                    border = BorderStroke(1.5.dp, Color(0x40C084FC)),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
                         Row(
+                            horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(8.dp)
-                                    .background(Color(0xFF34D399), CircleShape)
-                            )
-                            Text(
-                                text = "A(N) MATRIX PROJECTION",
-                                color = Color(0xFFE2E8F0),
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                        Text(
-                            text = "s=1..114 | Rank: 28",
-                            color = Color(0xFF94A3B8),
-                            fontSize = 10.sp,
-                            fontFamily = FontFamily.Monospace
-                        )
-                    }
-                    
-                    Spacer(modifier = Modifier.height(16.dp))
-                    
-                    MatrixVisualizerCanvas(matrix = result.matrixCells)
-                    
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .weight(1f)
-                                .background(Color(0x0FFFFFFF), RoundedCornerShape(16.dp))
-                                .border(BorderStroke(1.dp, Color(0x12FFFFFF)), RoundedCornerShape(16.dp))
-                                .padding(12.dp)
+                            modifier = Modifier.fillMaxWidth()
                         ) {
                             Text(
-                                text = "DETERMINANT Δ(N)",
-                                color = Color(0xFF94A3B8),
-                                fontSize = 9.sp,
+                                text = if (isArabic) "نتائج تحليل العوامل المفككة" else "Factorization Decomposition Results",
+                                color = Color(0xFFE9D5FF),
+                                fontSize = 15.sp,
                                 fontWeight = FontWeight.Bold
                             )
-                            val detText = if (result.determinantDouble.isInfinite() || result.determinantDouble.isNaN()) "Infinity" else String.format("%.4e", result.determinantDouble)
-                            Text(
-                                text = detText,
-                                color = Color(0xFFE2E8F0),
-                                fontSize = 14.sp,
-                                fontFamily = FontFamily.Monospace,
-                                modifier = Modifier.padding(top = 4.dp),
-                                overflow = TextOverflow.Ellipsis,
-                                maxLines = 1
+                            Icon(
+                                imageVector = Icons.Default.Verified,
+                                contentDescription = "Verified",
+                                tint = Color(0xFFC084FC)
                             )
                         }
-                        
-                        Column(
-                            modifier = Modifier
-                                .weight(1f)
-                                .background(Color(0x0FFFFFFF), RoundedCornerShape(16.dp))
-                                .border(BorderStroke(1.dp, Color(0x12FFFFFF)), RoundedCornerShape(16.dp))
-                                .padding(12.dp)
-                        ) {
-                            Text(
-                                text = "EIGEN-STABILITY",
-                                color = Color(0xFF94A3B8),
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                text = String.format("%.6f", result.eigenStability),
-                                color = Color(0xFF34D399),
-                                fontSize = 14.sp,
-                                fontFamily = FontFamily.Monospace,
-                                modifier = Modifier.padding(top = 4.dp)
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .weight(1f)
-                                .background(Color(0x0FFFFFFF), RoundedCornerShape(16.dp))
-                                .border(BorderStroke(1.dp, Color(0x12FFFFFF)), RoundedCornerShape(16.dp))
-                                .padding(12.dp)
-                        ) {
-                            Text(
-                                text = "T(N) SPECTRUM PRODUCT",
-                                color = Color(0xFFA5B4FC),
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            val tNText = result.tN.toString()
-                            Text(
-                                text = tNText,
-                                color = Color(0xFFE2E8F0),
-                                fontSize = 13.sp,
-                                fontFamily = FontFamily.Monospace,
-                                modifier = Modifier.padding(top = 4.dp),
-                                overflow = TextOverflow.Ellipsis,
-                                maxLines = 1
-                            )
-                        }
-                        
-                        Column(
-                            modifier = Modifier
-                                .weight(1f)
-                                .background(Color(0x0FFFFFFF), RoundedCornerShape(16.dp))
-                                .border(BorderStroke(1.dp, Color(0x12FFFFFF)), RoundedCornerShape(16.dp))
-                                .padding(12.dp)
-                        ) {
-                            Text(
-                                text = "gcd(T(N), N) OVERLAP",
-                                color = Color(0xFFA5B4FC),
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            val gcdText = result.eigenvalueGcd.toString()
-                            Text(
-                                text = gcdText,
-                                color = Color(0xFF34D399),
-                                fontSize = 13.sp,
-                                fontFamily = FontFamily.Monospace,
-                                modifier = Modifier.padding(top = 4.dp),
-                                overflow = TextOverflow.Ellipsis,
-                                maxLines = 1
-                            )
-                        }
-                    }
-
-                    if (result.eigenvaluesReal.isNotEmpty()) {
-                        Spacer(modifier = Modifier.height(12.dp))
-                        
-                        Text(
-                            text = "LEADING MATRIX EIGENVALUES (λ_i):",
-                            color = Color(0xFF64748B),
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 0.5.sp
-                        )
-                        
-                        Spacer(modifier = Modifier.height(6.dp))
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            for (i in 0 until minOf(4, result.eigenvaluesReal.size)) {
-                                Box(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .background(Color(0x0BFFFFFF), RoundedCornerShape(8.dp))
-                                        .border(BorderStroke(1.dp, Color(0x0AFFFFFF)), RoundedCornerShape(8.dp))
-                                        .padding(vertical = 6.dp, horizontal = 4.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = String.format("%.2f", result.eigenvaluesReal[i]),
-                                        color = Color(0xFFCBD5E1),
-                                        fontSize = 11.sp,
-                                        fontFamily = FontFamily.Monospace
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            item {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(
-                            Brush.linearGradient(
-                                colors = listOf(Color(0xFF4F46E5), Color(0xFF7C3AED))
-                            ),
-                            RoundedCornerShape(24.dp)
-                        )
-                        .padding(20.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column {
-                            val isPrime = result.factors.size <= 1
-                            Text(
-                                text = if (isPrime) "Prime Structure Found" else "Spectral Factors Found",
-                                color = Color.White,
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                text = if (isPrime) "No spectral divisor overlaps (g = 1)" else "Distinct spectral overlaps observed (g > 1)",
-                                color = Color(0xFFC7D2FE),
-                                fontSize = 11.sp
-                            )
-                        }
-                        Icon(
-                            imageVector = Icons.Default.CheckCircle,
-                            contentDescription = "Success",
-                            tint = Color.White,
-                            modifier = Modifier.size(28.dp)
-                        )
-                    }
-                    
-                    Spacer(modifier = Modifier.height(16.dp))
-                    
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        result.factors.forEach { factor ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .background(Color(0x26000000), RoundedCornerShape(12.dp))
-                                    .padding(horizontal = 14.dp, vertical = 10.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = factor.toString(),
-                                    color = Color.White,
-                                    fontSize = 16.sp,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.weight(1f),
-                                    overflow = TextOverflow.Ellipsis,
-                                    maxLines = 1
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                val isPrime = factor.isProbablePrime(15)
-                                Text(
-                                    text = if (isPrime) "Prime Factor" else "Composite Factor",
-                                    color = if (isPrime) Color(0xFFA5B4FC) else Color(0xFFFDA4AF),
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            item {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .border(BorderStroke(1.dp, Color(0x16FFFFFF)), RoundedCornerShape(24.dp))
-                        .background(Color(0x09FFFFFF), RoundedCornerShape(24.dp))
-                        .padding(20.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .background(Color(0xFF38BDF8), CircleShape)
-                        )
-                        Text(
-                            text = "A(N) EXACT INTEGER DETERMINANT",
-                            color = Color(0xFFE2E8F0),
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(14.dp))
-                    
-                    Text(
-                        text = "Calculates the exact theoretical integer determinant Δ(N) of the joint projection operator A(N) using division-free Bareiss reductions, bypassing floating-point bounds entirely.",
-                        color = Color(0xFF94A3B8),
-                        fontSize = 11.sp,
-                        modifier = Modifier.padding(bottom = 12.dp)
-                    )
-
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(Color(0x0FFFFFFF), RoundedCornerShape(16.dp))
-                            .border(BorderStroke(1.dp, Color(0x12FFFFFF)), RoundedCornerShape(16.dp))
-                            .padding(14.dp)
-                    ) {
-                        Text(
-                            text = "EXACT Δ(N) LENGTH",
-                            color = Color(0xFF94A3B8),
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        val numDigits = result.exactDeltaN.abs().toString().length
-                        Text(
-                            text = if (result.exactDeltaN == BigInteger.ZERO) "0 (Singular Matrix)" else "$numDigits Digit Integer",
-                            color = Color(0xFF38BDF8),
-                            fontSize = 15.sp,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(top = 2.dp)
-                        )
-
                         Spacer(modifier = Modifier.height(10.dp))
 
+                        // Prime Factors List Display
+                        val factorsText = if (result.factors.isEmpty()) {
+                            if (isArabic) "لا توجد عوامل أولية غير بديهية مكشوفة تحت هذا النطاق" 
+                            else "No non-trivial prime factors discovered under this scope"
+                        } else {
+                            result.factors.joinToString(" × ")
+                        }
+
                         Text(
-                            text = "gcd(Δ(N), N) FACTOR OVERLAP",
-                            color = Color(0xFF94A3B8),
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold
+                            text = if (isArabic) "العوامل الأولية المترشفة لـ N:" else "Discovered Prime Factors of N:",
+                            color = Color(0xFFC7D2FE),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
                         )
-                        Row(
-                            modifier = Modifier.padding(top = 2.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Color(0x19000000), RoundedCornerShape(8.dp))
+                                .padding(12.dp)
                         ) {
                             Text(
-                                text = result.exactDeltaGcd.toString(),
-                                color = if (result.exactDeltaGcd > BigInteger.ONE && result.exactDeltaGcd < result.exactDeltaN) Color(0xFF34D399) else Color(0xFFE2E8F0),
-                                fontSize = 14.sp,
+                                text = factorsText,
+                                color = Color.White,
+                                fontSize = 16.sp,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Bold,
-                                modifier = Modifier.weight(1f),
-                                overflow = TextOverflow.Ellipsis,
-                                maxLines = 1
-                            )
-                            if (result.exactDeltaGcd > BigInteger.ONE && result.exactDeltaGcd < result.exactDeltaN) {
-                                Box(
-                                    modifier = Modifier
-                                        .background(Color(0x2634D399), RoundedCornerShape(6.dp))
-                                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                                ) {
-                                    Text("FACTOR FOUND", color = Color(0xFF34D399), fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            item {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .border(BorderStroke(1.dp, Color(0x16FFFFFF)), RoundedCornerShape(24.dp))
-                        .background(Color(0x09FFFFFF), RoundedCornerShape(24.dp))
-                        .padding(20.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .background(Color(0xFFC084FC), CircleShape)
-                        )
-                        Text(
-                            text = "INDIVIDUAL MATRIX DETERMINANT GCD",
-                            color = Color(0xFFE2E8F0),
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    Text(
-                        text = "Computes D_s(N) = det(M_s - N*I) for all 114 Surah matrices. Calculates the global common divisor G(N) = gcd(D_1, D_2, ..., D_114). Factors are extracted directly from individual matrix determinant overlaps with N.",
-                        color = Color(0xFF94A3B8),
-                        fontSize = 11.sp,
-                        modifier = Modifier.padding(bottom = 12.dp)
-                    )
-
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(Color(0x0FFFFFFF), RoundedCornerShape(16.dp))
-                            .border(BorderStroke(1.dp, Color(0x12FFFFFF)), RoundedCornerShape(16.dp))
-                            .padding(14.dp)
-                    ) {
-                        Text(
-                            text = "GLOBAL MATRIX DIVISOR G(N)",
-                            color = Color(0xFF94A3B8),
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        val gNText = if (result.gN == BigInteger.ZERO) "0" else "${result.gN.abs().toString().length}-digit matrix GCD"
-                        Text(
-                            text = gNText,
-                            color = Color(0xFFC084FC),
-                            fontSize = 14.sp,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(top = 2.dp)
-                        )
-
-                        val currentN = try { viewModel.inputNumber.trim().filter { it.isDigit() }.toBigInteger() } catch(e: Exception) { BigInteger.ZERO }
-                        val isGNFactor = result.gN > BigInteger.ONE && result.gN < currentN
-                        val gcdGN_N = result.gN.gcd(currentN)
-                        val isGcdGNFactor = gcdGN_N > BigInteger.ONE && gcdGN_N < currentN
-
-                        if (isGNFactor || isGcdGNFactor) {
-                            Spacer(modifier = Modifier.height(10.dp))
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .background(Color(0x1AC084FC), RoundedCornerShape(12.dp))
-                                    .border(BorderStroke(1.dp, Color(0x33C084FC)), RoundedCornerShape(12.dp))
-                                    .padding(12.dp)
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.CheckCircle,
-                                        contentDescription = "Factor Found",
-                                        tint = Color(0xFFC084FC),
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                    val factorMsg = if (isGNFactor) {
-                                        "Potential Factor Identified: G(N) is a non-trivial factor of N (1 < G(N) < N)!"
-                                    } else {
-                                        "Potential Factor Identified: gcd(G(N), N) = $gcdGN_N is a non-trivial factor of N (1 < gcd(G(N), N) < N)!"
-                                    }
-                                    Text(
-                                        text = factorMsg,
-                                        color = Color(0xFFE9D5FF),
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                }
-                            }
-                        }
-
-                        if (result.gNFactors.isNotEmpty()) {
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Text(
-                                text = "INDIVIDUALLY DISCOVERED OVERLAPS",
-                                color = Color(0xFFA5B4FC),
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                result.gNFactors.forEach { factor ->
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .background(Color(0x14FFFFFF), RoundedCornerShape(8.dp))
-                                            .padding(horizontal = 10.dp, vertical = 6.dp),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            text = factor.toString(),
-                                            color = Color.White,
-                                            fontSize = 12.sp,
-                                            fontFamily = FontFamily.Monospace,
-                                            modifier = Modifier.weight(1f),
-                                            overflow = TextOverflow.Ellipsis,
-                                            maxLines = 1
-                                        )
-                                        Box(
-                                            modifier = Modifier
-                                                .background(Color(0x2034D399), RoundedCornerShape(4.dp))
-                                                .padding(horizontal = 5.dp, vertical = 1.dp)
-                                        ) {
-                                            Text("Det Divisor", color = Color(0xFF34D399), fontSize = 8.sp, fontWeight = FontWeight.Bold)
-                                        }
-                                    }
-                                }
-                            }
-                        } else {
-                            Spacer(modifier = Modifier.height(10.dp))
-                            Text(
-                                text = "No separate divisor overlaps found from individual D_s.",
-                                color = Color(0xFF64748B),
-                                fontSize = 11.sp
+                                modifier = Modifier.fillMaxWidth(),
+                                textAlign = TextAlign.Center
                             )
                         }
-                    }
 
-                    Spacer(modifier = Modifier.height(14.dp))
+                        Spacer(modifier = Modifier.height(14.dp))
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "INDIVIDUAL SURAH DETERMINANTS D_s(N)",
-                            color = Color(0xFFC7D2FE),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold
-                        )
+                        // Copy Prime Factors Button (User Request 1)
+                        val clipboardManager = LocalClipboardManager.current
                         Button(
-                            onClick = { showAllDets = !showAllDets },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = Color(0x1F94A3B8),
-                                contentColor = Color.White
-                            ),
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                            modifier = Modifier.height(28.dp),
-                            shape = RoundedCornerShape(6.dp)
-                        ) {
-                            Text(if (showAllDets) "HIDE DETERMINANTS" else "SHOW ALL (114)", fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-
-                    if (showAllDets) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(max = 240.dp)
-                                .verticalScroll(rememberScrollState())
-                                .background(Color(0x0FFFFFFF), RoundedCornerShape(12.dp))
-                                .border(BorderStroke(1.dp, Color(0x12FFFFFF)), RoundedCornerShape(12.dp))
-                                .padding(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            result.individualDets.forEachIndexed { index, d_s ->
-                                val surahNum = index + 1
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .background(Color(0x0AFFFFFF), RoundedCornerShape(6.dp))
-                                        .padding(horizontal = 10.dp, vertical = 6.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = "Surah $surahNum (D_$surahNum)",
-                                        color = Color(0xFFA5B4FC),
-                                        fontSize = 11.sp,
-                                        fontFamily = FontFamily.Monospace,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    val dText = d_s.toString()
-                                    val displayedText = if (dText.length > 24) {
-                                        dText.take(10) + "..." + dText.takeLast(10) + " (${dText.length} digits)"
-                                    } else {
-                                        dText
-                                    }
-                                    Text(
-                                        text = displayedText,
-                                        color = Color(0xFFE2E8F0),
-                                        fontSize = 11.sp,
-                                        fontFamily = FontFamily.Monospace,
-                                        modifier = Modifier.weight(1f, fill = false),
-                                        overflow = TextOverflow.Ellipsis,
-                                        maxLines = 1
-                                    )
+                            onClick = {
+                                if (result.factors.isNotEmpty()) {
+                                    val textToCopy = result.factors.joinToString(", ")
+                                    clipboardManager.setText(AnnotatedString(textToCopy))
+                                    Toast.makeText(
+                                        context,
+                                        if (isArabic) "تم نسخ العوامل الأولية: $textToCopy" else "Prime factors copied: $textToCopy",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                } else {
+                                    Toast.makeText(
+                                        context,
+                                        if (isArabic) "لا توجد عوامل لنسخها" else "No factors to copy",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
                                 }
-                            }
-                        }
-                    }
-                }
-            }
-
-            item {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .border(BorderStroke(1.dp, Color(0x16FFFFFF)), RoundedCornerShape(24.dp))
-                        .background(Color(0x09FFFFFF), RoundedCornerShape(24.dp))
-                        .padding(20.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .background(Color(0xFFF59E0B), CircleShape)
-                        )
-                        Text(
-                            text = "FINITE PROJECTIONS & PRIMALITY MONITOR",
-                            color = Color(0xFFE2E8F0),
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    Text(
-                        text = "Projects all 114 Surah matrices into prime finite fields F_p. Monitoring rank drop characteristics compares how the space reduces: a divisor p of N exhibits clear rank drops (< 28) and eigenvalue stability changes.",
-                        color = Color(0xFF94A3B8),
-                        fontSize = 11.sp,
-                        modifier = Modifier.padding(bottom = 12.dp)
-                    )
-
-                    Text(
-                        text = "TEST CUSTOM PRIMES (p):",
-                        color = Color(0xFFF59E0B),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 0.5.sp,
-                        modifier = Modifier.padding(bottom = 6.dp)
-                    )
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        TextField(
-                            value = viewModel.customPrimesText,
-                            onValueChange = { viewModel.customPrimesText = it },
-                            placeholder = { Text("e.g. 19, 113, 239", color = Color(0xFF64748B)) },
-                            colors = TextFieldDefaults.colors(
-                                focusedContainerColor = Color(0x19000000),
-                                unfocusedContainerColor = Color(0x0C000000),
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White,
-                                focusedIndicatorColor = Color.Transparent,
-                                unfocusedIndicatorColor = Color.Transparent
-                            ),
-                            modifier = Modifier
-                                .weight(1f)
-                                .clip(RoundedCornerShape(12.dp))
-                                .border(BorderStroke(1.dp, Color(0x1EFFFFFF)), RoundedCornerShape(12.dp)),
-                            singleLine = true,
-                            textStyle = LocalTextStyle.current.copy(
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        )
-                        
-                        Spacer(modifier = Modifier.width(8.dp))
-                        
-                        Button(
-                            onClick = { viewModel.analyze(context) },
-                            enabled = !viewModel.isAnalyzing,
-                            shape = RoundedCornerShape(12.dp),
+                            },
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = Color(0xFFF59E0B),
+                                containerColor = Color(0xFFC084FC),
                                 contentColor = Color.Black
                             ),
-                            modifier = Modifier.height(48.dp)
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text("RUN", fontWeight = FontWeight.Bold, fontSize = 11.sp)
-                        }
-                    }
-
-                    if (result.primeRankProfiles.isNotEmpty()) {
-                        var selectedPrime by remember(result) {
-                            mutableStateOf(result.primeRankProfiles.keys.firstOrNull() ?: "")
-                        }
-                        
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState())
-                                .padding(vertical = 4.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            result.primeRankProfiles.keys.forEach { p ->
-                                val isSelected = p == selectedPrime
-                                val isDivisor = result.factors.any { it.toString() == p }
-                                Box(
-                                    modifier = Modifier
-                                        .background(
-                                            if (isSelected) Color(0xFFF59E0B) else Color(0x1AFFFFFF),
-                                            RoundedCornerShape(10.dp)
-                                        )
-                                        .clickable { selectedPrime = p }
-                                        .padding(horizontal = 12.dp, vertical = 6.dp)
-                                ) {
-                                    val buttonText = if (p.length > 15) {
-                                        "p = ${p.take(6)}...${p.takeLast(6)}" + (if (isDivisor) " (Divisor)" else "")
-                                    } else {
-                                        "p = $p" + (if (isDivisor) " (Divisor)" else "")
-                                    }
-                                    Text(
-                                        text = buttonText,
-                                        color = if (isSelected) Color.Black else Color.White,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        fontFamily = FontFamily.Monospace
-                                    )
-                                }
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        val avgRank = result.averageRanks[selectedPrime] ?: 0.0
-                        val isDivisorOfN = result.factors.any { it.toString() == selectedPrime }
-                        val drops = result.rankDrops[selectedPrime] ?: emptyList()
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Column(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .background(Color(0x0FFFFFFF), RoundedCornerShape(12.dp))
-                                    .border(BorderStroke(1.dp, Color(0x12FFFFFF)), RoundedCornerShape(12.dp))
-                                    .padding(10.dp)
-                            ) {
-                                val rankColor = if (avgRank < 28.0) Color(0xFFF59E0B) else Color(0xFF10B981)
-                                Text("AVERAGE F_p RANK", color = Color(0xFF94A3B8), fontSize = 8.sp, fontWeight = FontWeight.Bold)
-                                Text(
-                                    text = "%.5f".format(avgRank) + "/28",
-                                    color = rankColor,
-                                    fontSize = 14.sp,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(top = 2.dp)
-                                )
-                            }
-
-                            Column(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .background(Color(0x0FFFFFFF), RoundedCornerShape(12.dp))
-                                    .border(BorderStroke(1.dp, Color(0x12FFFFFF)), RoundedCornerShape(12.dp))
-                                    .padding(10.dp)
-                            ) {
-                                Text("PROJECTION DROPS", color = Color(0xFF94A3B8), fontSize = 8.sp, fontWeight = FontWeight.Bold)
-                                Text(
-                                    text = "${drops.size} Matrices",
-                                    color = if (drops.isNotEmpty()) Color(0xFFF87171) else Color(0xFF94A3B8),
-                                    fontSize = 14.sp,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(top = 2.dp)
-                                )
-                            }
-                        }
-
-                        val currentN = try { viewModel.inputNumber.trim().filter { it.isDigit() }.toBigInteger() } catch(e: Exception) { BigInteger.ZERO }
-                        val currentP = try { BigInteger(selectedPrime) } catch(e: Exception) { BigInteger.ZERO }
-                        val pDividesN = currentN != BigInteger.ZERO && currentP > BigInteger.ONE && currentN.mod(currentP) == BigInteger.ZERO
-
-                        if (pDividesN) {
-                            Spacer(modifier = Modifier.height(10.dp))
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .background(Color(0x1A34D399), RoundedCornerShape(12.dp))
-                                    .border(BorderStroke(1.dp, Color(0x3334D399)), RoundedCornerShape(12.dp))
-                                    .padding(12.dp)
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.CheckCircle,
-                                        contentDescription = "Indicator",
-                                        tint = Color(0xFF34D399),
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                    Text(
-                                        text = "Modular Projection Indicator: Prime p = $selectedPrime divides N. The average M_s mod p rank is ${"%.5f".format(avgRank)}/28 (decreased significantly). This indicates a highly confident divisor of N!",
-                                        color = Color(0xFFA7F3D0),
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                }
-                            }
-                        } else if (isDivisorOfN) {
-                            Spacer(modifier = Modifier.height(10.dp))
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .background(Color(0x1AF59E0B), RoundedCornerShape(12.dp))
-                                    .border(BorderStroke(1.dp, Color(0x33F59E0B)), RoundedCornerShape(12.dp))
-                                    .padding(12.dp)
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Warning,
-                                        contentDescription = "Analysis",
-                                        tint = Color(0xFFF59E0B),
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                    Text(
-                                        text = "Significant rank drop observed modulo spectral factor p! Average rank reduced below maximum (28.00) confirms non-trivial subspace reductions.",
-                                        color = Color(0xFFFDE68A),
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                }
-                            }
-                        }
-
-                        if (drops.isNotEmpty()) {
-                            Spacer(modifier = Modifier.height(12.dp))
+                            Icon(Icons.Default.ContentCopy, contentDescription = "Copy")
+                            Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "DETAILED RANK DROPS FOR SELECTED P:",
-                                color = Color(0xFF94A3B8),
-                                fontSize = 10.sp,
+                                text = if (isArabic) "نسخ العوامل الأولية" else "Copy Prime Factors",
                                 fontWeight = FontWeight.Bold
                             )
-                            Spacer(modifier = Modifier.height(6.dp))
+                        }
+                    }
+                }
+            }
+
+            // Advanced Factoring Algorithm Step-by-Step Tracker (User Request 3)
+            item {
+                AdvancedFactoringTracker(
+                    nStr = viewModel.inputNumber,
+                    deltaN = result.deltaN,
+                    gResult = result.advancedFactor,
+                    isArabic = isArabic
+                )
+            }
+
+            // Spectral Fingerprint Φ(N) Visualizer (User Request 2)
+            item {
+                SpectralFingerprintChart(
+                    fingerprint = result.spectralFingerprint,
+                    isArabic = isArabic
+                )
+            }
+
+            // Modular Rank Reduction Test for Primality and Factorization (User Request 1)
+            item {
+                RankReductionTestTracker(
+                    results = result.rankReductionResults,
+                    isArabic = isArabic
+                )
+            }
+
+            // Individual Surah Determinants D_s(N) Card
+            item {
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0x13FFFFFF)),
+                    border = BorderStroke(1.dp, Color(0x22FFFFFF)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = if (isArabic) "محددات السور الفردية D_s(N)" else "Individual Surah Determinants D_s(N)",
+                                color = Color(0xFFC7D2FE),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Button(
+                                onClick = { showAllDets = !showAllDets },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0x1F94A3B8),
+                                    contentColor = Color.White
+                                ),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                modifier = Modifier.height(28.dp),
+                                shape = RoundedCornerShape(6.dp)
+                            ) {
+                                Text(
+                                    text = if (showAllDets) {
+                                        if (isArabic) "إخفاء التفاصيل" else "HIDE"
+                                    } else {
+                                        if (isArabic) "عرض الكل (114)" else "SHOW ALL (114)"
+                                    },
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+
+                        if (showAllDets) {
+                            Spacer(modifier = Modifier.height(8.dp))
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .heightIn(max = 120.dp)
+                                    .heightIn(max = 240.dp)
                                     .verticalScroll(rememberScrollState())
                                     .background(Color(0x0FFFFFFF), RoundedCornerShape(12.dp))
                                     .border(BorderStroke(1.dp, Color(0x12FFFFFF)), RoundedCornerShape(12.dp))
                                     .padding(8.dp),
                                 verticalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
-                                drops.forEach { dropDetail ->
+                                result.individualDets.forEachIndexed { index, d_s ->
+                                    val surahNum = index + 1
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                                            .background(Color(0x0AFFFFFF), RoundedCornerShape(6.dp))
+                                            .padding(horizontal = 10.dp, vertical = 6.dp),
                                         horizontalArrangement = Arrangement.SpaceBetween,
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Text(dropDetail, color = Color(0xFFCBD5E1), fontSize = 11.sp, fontFamily = FontFamily.Monospace)
-                                        Box(
-                                            modifier = Modifier
-                                                .background(Color(0x1AF59E0B), RoundedCornerShape(4.dp))
-                                                .padding(horizontal = 4.dp, vertical = 1.dp)
-                                        ) {
-                                            Text("Drop", color = Color(0xFFF59E0B), fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                                        Text(
+                                            text = "Surah $surahNum (D_$surahNum)",
+                                            color = Color(0xFFA5B4FC),
+                                            fontSize = 11.sp,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        val dText = d_s.toString()
+                                        val displayedText = if (dText.length > 20) {
+                                            dText.take(8) + "..." + dText.takeLast(8) + " (${dText.length} d)"
+                                        } else {
+                                            dText
                                         }
+                                        Text(
+                                            text = displayedText,
+                                            color = Color(0xFFE2E8F0),
+                                            fontSize = 11.sp,
+                                            fontFamily = FontFamily.Monospace,
+                                            overflow = TextOverflow.Ellipsis,
+                                            maxLines = 1
+                                        )
                                     }
                                 }
                             }
                         }
-                    } else {
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Text(
-                            text = "No projection primes calculated yet.",
-                            color = Color(0xFF64748B),
-                            fontSize = 11.sp
-                        )
                     }
                 }
             }
@@ -1395,197 +574,231 @@ fun AnalyzeTab(viewModel: FactorizerViewModel) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MatrixVisualizerCanvas(matrix: Array<IntArray>) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(200.dp)
-            .background(Color(0x1F0F172A), RoundedCornerShape(16.dp))
-            .border(BorderStroke(1.dp, Color(0x0FFFFFFF)), RoundedCornerShape(16.dp))
-            .padding(8.dp)
-    ) {
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val rows = 28
-            val cols = 28
-            val cellW = size.width / cols
-            val cellH = size.height / rows
-
-            var maxValue = 1
-            for (i in 0 until rows) {
-                for (j in 0 until cols) {
-                    if (matrix[i][j] > maxValue) {
-                        maxValue = matrix[i][j]
-                    }
-                }
-            }
-
-            for (i in 0 until rows) {
-                for (j in 0 until cols) {
-                    val value = matrix[i][j]
-                    val intensity = if (value > 0) (value.toFloat() / maxValue).coerceIn(0.1f, 1.0f) else 0.0f
-                    if (intensity > 0f) {
-                        val color = Color(0xFF6366F1).copy(alpha = intensity)
-                        drawRect(
-                            color = color,
-                            topLeft = Offset(j * cellW, i * cellH),
-                            size = Size(cellW - 0.5f, cellH - 0.5f)
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun FactorizerScreen(modifier: Modifier = Modifier, viewModel: FactorizerViewModel = viewModel()) {
-    Column(modifier = modifier.padding(16.dp)) {
-        AnalyzeTab(viewModel)
-    }
-}
-
-@Composable
-fun MatricesTab(viewModel: FactorizerViewModel) {
-    var selectedS by remember { mutableStateOf(1) }
-    val mockLoaded = remember { mutableMapOf<Int, Array<IntArray>>() }
-    val matrix = remember(selectedS) { MatrixHelper.getMatrixForSurah(selectedS, mockLoaded) }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        Text(
-            text = "Quranic Spectral Operator matrices",
-            color = Color.White,
-            fontWeight = FontWeight.Bold,
-            fontSize = 16.sp
-        )
-        
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Text("Select Surah s:", color = Color(0xFF94A3B8), fontSize = 14.sp)
-            Slider(
-                value = selectedS.toFloat(),
-                onValueChange = { selectedS = it.toInt() },
-                valueRange = 1f..114f,
-                modifier = Modifier.weight(1f)
-            )
+fun MatricesTab(isArabic: Boolean) {
+    var selectedSurah by remember { mutableStateOf<Int?>(null) }
+    
+    if (selectedSurah == null) {
+        Column(modifier = Modifier.padding(16.dp)) {
             Text(
-                text = "s = $selectedS",
-                color = Color(0xFFA5B4FC),
+                text = if (isArabic) "مستكشف مصفوفات السور الـ 114" else "The 114 Quranic Matrices Explorer",
+                fontSize = 15.sp,
                 fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Monospace,
-                fontSize = 15.sp
+                color = Color.White
             )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = if (isArabic) 
+                    "انقر على أي سورة لاستكشاف مصفوفتها الطيفية ذات الحجم 28x28 والمنشأة بناءً على معاييرها الحسابية وعدد آياتها."
+                    else "Click any Surah to inspect its generated 28x28 symmetric matrix based on historical verses count.",
+                color = Color(0xFF94A3B8),
+                fontSize = 12.sp,
+                modifier = Modifier.padding(bottom = 12.dp)
+            )
+
+            // Grid of 114 Surahs
+            LazyVerticalGrid(
+                columns = GridCells.Adaptive(minSize = 74.dp),
+                modifier = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items((1..114).toList()) { s ->
+                    val verses = MatrixHelper.SURAH_VERSES[s - 1]
+                    Card(
+                        onClick = { selectedSurah = s },
+                        colors = CardDefaults.cardColors(containerColor = Color(0x0FFFFFFF)),
+                        border = BorderStroke(1.dp, Color(0x1AFFFFFF)),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(68.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(4.dp),
+                            verticalArrangement = Arrangement.Center,
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = "$s",
+                                color = Color(0xFFC084FC),
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = if (isArabic) "$verses آية" else "$verses Verses",
+                                color = Color(0xFFCBD5E1),
+                                fontSize = 9.sp
+                            )
+                        }
+                    }
+                }
+            }
         }
+    } else {
+        val s = selectedSurah!!
+        val m_s = MatrixHelper.generateQuranicMatrix(s)
+        val verses = MatrixHelper.SURAH_VERSES[s - 1]
 
-        Text(
-            text = "Operator Matrix M_$selectedS Shape Projection:",
-            color = Color(0xFF94A3B8),
-            fontSize = 12.sp
-        )
-
-        MatrixVisualizerCanvas(matrix = matrix)
-
-        Card(
-            colors = CardDefaults.cardColors(containerColor = Color(0x0FFFFFFF)),
-            border = BorderStroke(1.dp, Color(0x12FFFFFF)),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = { selectedSurah = null }) {
+                    Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color(0xFFC084FC))
+                }
                 Text(
-                    text = "Matrix Operators & Lattices",
-                    color = Color.White,
+                    text = (if (isArabic) "مصفوفة السورة " else "Matrix for Surah ") + s,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp
+                    fontSize = 15.sp,
+                    color = Color.White
                 )
-                Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "Each Surah generates a unique 28x28 matrix mapping of phonetic weights acting as an eigenvalue filter to intercept divisibility patterns in large numbers N.",
-                    color = Color(0xFF94A3B8),
-                    fontSize = 11.sp
+                    text = if (isArabic) "$verses آية" else "$verses Ayat",
+                    color = Color(0xFFF59E0B),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
                 )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Draw interactive 28x28 matrix viewport
+            Card(
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0x19000000)),
+                border = BorderStroke(1.dp, Color(0x22FFFFFF)),
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+            ) {
+                Box(modifier = Modifier.fillMaxSize()) {
+                    val stateVertical = rememberScrollState()
+                    val stateHorizontal = rememberScrollState()
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(stateVertical)
+                            .horizontalScroll(stateHorizontal)
+                            .padding(12.dp)
+                    ) {
+                        for (i in 0 until 28) {
+                            Row {
+                                for (j in 0 until 28) {
+                                    val valCell = m_s[i][j]
+                                    Box(
+                                        modifier = Modifier
+                                            .size(28.dp)
+                                            .background(
+                                                if (i == j) Color(0x33C084FC) 
+                                                else if (valCell > 0) Color(0x1AF59E0B) 
+                                                else Color.Transparent
+                                            )
+                                            .border(0.5.dp, Color(0x12FFFFFF)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = "$valCell",
+                                            fontSize = 9.sp,
+                                            color = if (i == j) Color(0xFFE9D5FF) else if (valCell > 0) Color(0xFFFDE68A) else Color(0xFF64748B),
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HistoryTab(viewModel: FactorizerViewModel) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-    ) {
+fun HistoryTab(viewModel: FactorizerViewModel, isArabic: Boolean) {
+    Column(modifier = Modifier.padding(16.dp)) {
         Text(
-            text = "Factorization History Log",
-            color = Color.White,
+            text = if (isArabic) "سجل العمليات السابقة" else "Calculations History Log",
+            fontSize = 15.sp,
             fontWeight = FontWeight.Bold,
-            fontSize = 16.sp,
+            color = Color.White
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = if (isArabic) 
+                "الأعداد المدخلة سابقاً وحصيلتها من العوامل الطيفية الميكرومكتشفة."
+                else "Locally cached analysis runs with their respective primary factors.",
+            color = Color(0xFF94A3B8),
+            fontSize = 12.sp,
             modifier = Modifier.padding(bottom = 12.dp)
         )
 
-        if (viewModel.historyList.isEmpty()) {
+        if (viewModel.historyLog.isEmpty()) {
             Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
+                    .weight(1f)
+                    .fillMaxWidth(),
                 contentAlignment = Alignment.Center
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(
-                        imageVector = Icons.Default.Info,
-                        contentDescription = "No history",
-                        tint = Color(0xFF475569),
-                        modifier = Modifier.size(48.dp)
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text("No history analyzed yet", color = Color(0xFF475569))
-                }
+                Text(
+                    text = if (isArabic) "السجل فارغ حالياً" else "No calculations run yet.",
+                    color = Color(0xFF64748B),
+                    fontSize = 14.sp
+                )
             }
         } else {
             LazyColumn(
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                items(viewModel.historyList) { item ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(Color(0x0FFFFFFF), RoundedCornerShape(16.dp))
-                            .border(BorderStroke(1.dp, Color(0x12FFFFFF)), RoundedCornerShape(16.dp))
-                            .clickable {
-                                viewModel.inputNumber = item.first
-                                viewModel.activeTab = "analyze"
-                            }
-                            .padding(16.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                items(viewModel.historyLog) { item ->
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = Color(0x0FFFFFFF)),
+                        border = BorderStroke(1.dp, Color(0x1DFFFFFF)),
+                        shape = RoundedCornerShape(12.dp),
+                        onClick = {
+                            viewModel.inputNumber = item.first
+                            viewModel.activeTab = "analyze"
+                        },
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(14.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text(
+                                    text = "N = ${item.first}",
+                                    color = Color.White,
+                                    fontSize = 14.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = if (isArabic) "انقر لإعادة التحميل" else "Click to re-analyze",
+                                    color = Color(0xFFC084FC),
+                                    fontSize = 11.sp
+                                )
+                            }
+                            
+                            val facs = item.second
+                            val facsStr = if (facs.isEmpty()) "Prime / Prime candidates" else facs.joinToString(", ")
                             Text(
-                                text = "N = " + item.first,
-                                color = Color.White,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 14.sp,
-                                fontFamily = FontFamily.Monospace,
-                                overflow = TextOverflow.Ellipsis,
-                                maxLines = 1
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "Factors: " + item.second.joinToString(" × "),
-                                color = Color(0xFFA5B4FC),
+                                text = facsStr,
+                                color = Color(0xFF34D399),
                                 fontSize = 12.sp,
-                                fontFamily = FontFamily.Monospace,
-                                overflow = TextOverflow.Ellipsis,
-                                maxLines = 1
+                                fontFamily = FontFamily.Monospace
                             )
                         }
                     }
@@ -1596,128 +809,673 @@ fun HistoryTab(viewModel: FactorizerViewModel) {
 }
 
 @Composable
-fun InfoTab() {
-    Column(
+fun InformationTab(isArabic: Boolean) {
+    LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState())
             .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        Text(
-            text = "Mathematical Framework",
-            color = Color.White,
-            fontWeight = FontWeight.Bold,
-            fontSize = 18.sp
-        )
-        
-        Text(
-            text = "This application implements the proposed spectral prime factorizer operators utilizing the 114 Matrices on modular rings.",
-            color = Color(0xFFCBD5E1),
-            fontSize = 13.sp
-        )
+        item {
+            Text(
+                text = if (isArabic) "معلومات نظرية ومكتشفات الدكتور سعودي" else "Theoretical Context & Discoveries of Dr. Saoudi",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = if (isArabic)
+                    "يمزج التطبيق بين علوم الجبر الخطي وتناسق حساب القرآن الكريم لدراسة صفة العوامل الطيفية."
+                    else "Mixing clean linear algebra with Quranic numerical systems backends for factor analyses.",
+                color = Color(0xFF94A3B8),
+                fontSize = 11.sp
+            )
+        }
 
-        Divider(color = Color(0x16FFFFFF))
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color(0x0FFFFFFF)),
+                border = BorderStroke(1.dp, Color(0x15FFFFFF)),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Text(
+                        text = if (isArabic) "نموذج المصفوفة المصاحبة A(N)" else "The Combined Matrix A(N)",
+                        color = Color(0xFFC084FC),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = if (isArabic)
+                            "يجمع طاقة بواقي القسمة (N mod s) للأبعاد 114 سورة عبر ضربها في مصفوفات السور M_s. تعتمد مصفوفات الاستنساخ 28x28 على عدد آيات السورة لفرض اتساق عددي متين ومحدد طيفي دقيق."
+                            else "Calculates the dynamic sum A(N) = sum_{s=1}^{114} (N mod s) * M_s. The 28x28 symmetric matrix of each Surah derives elements from historical verses count for rigorous mathematical evaluation.",
+                        color = Color(0xFFCBD5E1),
+                        fontSize = 11.sp,
+                        lineHeight = 15.sp
+                    )
+                }
+            }
+        }
 
-        Text(
-            text = "1. Matrix Sum operator A(N):",
-            color = Color(0xFFA5B4FC),
-            fontWeight = FontWeight.Bold,
-            fontSize = 14.sp
-        )
-        Text(
-            text = "A(N) is defined as the weighted linear combination sum across all 114 Surah matrices:\n" +
-                   "A(N) = Σ (N mod s) * M_s",
-            color = Color(0xFF94A3B8),
-            fontFamily = FontFamily.Monospace,
-            fontSize = 11.sp,
-            modifier = Modifier
-                .background(Color(0x0FFFFFFF), RoundedCornerShape(8.dp))
-                .padding(12.dp)
-        )
-
-        Text(
-            text = "2. Determinant check Δ(N):",
-            color = Color(0xFFA5B4FC),
-            fontWeight = FontWeight.Bold,
-            fontSize = 14.sp
-        )
-        Text(
-            text = "The determinant of A(N) is calculated to identify lattice stability overlaps:\n" +
-                   "Δ(N) = det(A(N))\n" +
-                   "g = gcd(Δ(N), N)\n" +
-                   "If 1 < g < N, we directly obtain a non-trivial factor of N.",
-            color = Color(0xFF94A3B8),
-            fontFamily = FontFamily.Monospace,
-            fontSize = 11.sp,
-            modifier = Modifier
-                .background(Color(0x0FFFFFFF), RoundedCornerShape(8.dp))
-                .padding(12.dp)
-        )
-
-        Text(
-            text = "Theoretical context:",
-            color = Color.White,
-            fontWeight = FontWeight.Bold,
-            fontSize = 14.sp
-        )
-        Text(
-            text = "This model presents an elegant exploratory framework combining number theory and quantum spectral matrix theory. Highly complex numeric arrays represent multidimensional spaces that reveal factors quickly under row reductions.",
-            color = Color(0xFF94A3B8),
-            fontSize = 12.sp
-        )
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color(0x0FFFFFFF)),
+                border = BorderStroke(1.dp, Color(0x15FFFFFF)),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Text(
+                        text = if (isArabic) "محددات الفروقات D_s(N) والقواسم" else "D_s(N) Determinants & gcd(G, N)",
+                        color = Color(0xFFF59E0B),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = if (isArabic)
+                            "إن حساب D_s(N) = det(M_s - N * I) لكل سورة من سور القرآن الـ 114 يوفر محددات جبارة. القاسم المشترك الأكبر G(N) لمحددات كافة السور يكشف العوامل الأولية للعدد N غير المعروفة سابقاً بشكل مباشر."
+                            else "Calculates D_s(N) = det(M_s - N*I) for each of the 114 matrices. G(N) = gcd(D_1,...,D_114) then acts as a potential identifier of n-factors when intersecting with N.",
+                        color = Color(0xFFCBD5E1),
+                        fontSize = 11.sp,
+                        lineHeight = 15.sp
+                    )
+                }
+            }
+        }
     }
 }
 
 @Composable
 fun GlassBottomNav(
     activeTab: String,
-    onTabSelected: (String) -> Unit
+    onTabSelected: (String) -> Unit,
+    isArabic: Boolean
 ) {
-    Row(
+    NavigationBar(
+        containerColor = Color(0xFF0F172A),
+        tonalElevation = 8.dp,
+        modifier = Modifier.drawBehind {
+            drawLine(
+                color = Color(0x15FFFFFF),
+                start = Offset(0f, 0f),
+                end = Offset(size.width, 0f),
+                strokeWidth = 1.dp.toPx()
+            )
+        }
+    ) {
+        NavigationBarItem(
+            selected = activeTab == "analyze",
+            onClick = { onTabSelected("analyze") },
+            icon = { Icon(Icons.Outlined.Calculate, contentDescription = "Analyze") },
+            label = { Text(if (isArabic) "تحليل" else "Analyze", fontSize = 11.sp) },
+            colors = NavigationBarItemDefaults.colors(
+                selectedIconColor = Color(0xFFC084FC),
+                selectedTextColor = Color(0xFFC084FC),
+                unselectedIconColor = Color(0xFF64748B),
+                unselectedTextColor = Color(0xFF64748B),
+                indicatorColor = Color(0x22C084FC)
+            )
+        )
+        NavigationBarItem(
+            selected = activeTab == "matrices",
+            onClick = { onTabSelected("matrices") },
+            icon = { Icon(Icons.Outlined.GridOn, contentDescription = "Matrices") },
+            label = { Text(if (isArabic) "مصفوفات" else "Matrices", fontSize = 11.sp) },
+            colors = NavigationBarItemDefaults.colors(
+                selectedIconColor = Color(0xFFC084FC),
+                selectedTextColor = Color(0xFFC084FC),
+                unselectedIconColor = Color(0xFF64748B),
+                unselectedTextColor = Color(0xFF64748B),
+                indicatorColor = Color(0x22C084FC)
+            )
+        )
+        NavigationBarItem(
+            selected = activeTab == "history",
+            onClick = { onTabSelected("history") },
+            icon = { Icon(Icons.Outlined.History, contentDescription = "History") },
+            label = { Text(if (isArabic) "السجل" else "History", fontSize = 11.sp) },
+            colors = NavigationBarItemDefaults.colors(
+                selectedIconColor = Color(0xFFC084FC),
+                selectedTextColor = Color(0xFFC084FC),
+                unselectedIconColor = Color(0xFF64748B),
+                unselectedTextColor = Color(0xFF64748B),
+                indicatorColor = Color(0x22C084FC)
+            )
+        )
+        NavigationBarItem(
+            selected = activeTab == "info",
+            onClick = { onTabSelected("info") },
+            icon = { Icon(Icons.Outlined.Book, contentDescription = "Info") },
+            label = { Text(if (isArabic) "فكرة" else "Theory", fontSize = 11.sp) },
+            colors = NavigationBarItemDefaults.colors(
+                selectedIconColor = Color(0xFFC084FC),
+                selectedTextColor = Color(0xFFC084FC),
+                unselectedIconColor = Color(0xFF64748B),
+                unselectedTextColor = Color(0xFF64748B),
+                indicatorColor = Color(0x22C084FC)
+            )
+        )
+    }
+}
+
+@Composable
+fun FooterLayout(isArabic: Boolean) {
+    // Dr. Saoudi Mohamed Copyright Footer (Mandatory - User Request 3)
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color(0xFF0F172A))
-            .drawBehind {
-                drawLine(
-                    color = Color(0x10FFFFFF),
-                    start = Offset(0f, 0f),
-                    end = Offset(size.width, 0f),
-                    strokeWidth = 1.dp.toPx()
-                )
-            }
-            .padding(vertical = 10.dp),
-        horizontalArrangement = Arrangement.SpaceAround,
-        verticalAlignment = Alignment.CenterVertically
+            .background(Color(0xFF0A0F1D))
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        contentAlignment = Alignment.Center
     ) {
-        val tabs = listOf(
-            Triple("analyze", Icons.Default.PlayArrow, "Analyze"),
-            Triple("matrices", Icons.Default.Home, "Matrices"),
-            Triple("history", Icons.Default.Favorite, "History"),
-            Triple("info", Icons.Default.Info, "Info")
-        )
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                text = if (isArabic) 
+                    "جميع الحقوق محفوظة للدكتور سعودي محمد ©" 
+                    else "All rights reserved to Dr. Saoudi Mohamed ©",
+                color = Color(0xFFCBD5E1),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = if (isArabic) 
+                    "الهاتف: 00213657348908" 
+                    else "Phone: 00213657348908",
+                color = Color(0xFFF59E0B),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
+                textAlign = TextAlign.Center
+            )
+        }
+    }
+}
+
+@Composable
+fun SpectralFingerprintChart(
+    fingerprint: List<Double>,
+    isArabic: Boolean
+) {
+    if (fingerprint.isEmpty()) return
+
+    val maxVal = fingerprint.maxOrNull() ?: 1.0
+    val minVal = fingerprint.minOrNull() ?: 0.0
+    val range = if (maxVal == minVal) 1.0 else (maxVal - minVal)
+
+    var hoveredIndex by remember { mutableStateOf<Int?>(0) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color(0x0AFFFFFF), RoundedCornerShape(12.dp))
+            .border(BorderStroke(1.dp, Color(0x15FFFFFF)), RoundedCornerShape(12.dp))
+            .padding(12.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = if (isArabic) "البصمة الطيفية للقرآن الكريم Φ(N)" else "Quranic Spectral Fingerprint Φ(N)",
+                color = Color(0xFFA5B4FC),
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = "114 Surahs",
+                color = Color(0xFF64748B),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
         
-        tabs.forEach { tab ->
-            val isSelected = activeTab == tab.first
-            Column(
+        Spacer(modifier = Modifier.height(10.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Box(
                 modifier = Modifier
                     .weight(1f)
-                    .clickable { onTabSelected(tab.first) },
-                horizontalAlignment = Alignment.CenterHorizontally
+                    .background(Color(0x0FFFFFFF), RoundedCornerShape(8.dp))
+                    .padding(8.dp)
             ) {
-                Icon(
-                    imageVector = tab.second,
-                    contentDescription = tab.third,
-                    tint = if (isSelected) Color(0xFF818CF8) else Color(0xFF64748B),
-                    modifier = Modifier.size(24.dp)
-                )
-                Spacer(modifier = Modifier.height(2.dp))
+                Column {
+                    Text(
+                        text = if (isArabic) "العظمى (Max)" else "Peak Peak (Max)",
+                        color = Color(0xFF94A3B8),
+                        fontSize = 9.sp
+                    )
+                    Text(
+                        text = "%.3f".format(maxVal),
+                        color = Color(0xFF34D399),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+            }
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .background(Color(0x0FFFFFFF), RoundedCornerShape(8.dp))
+                    .padding(8.dp)
+            ) {
+                Column {
+                    Text(
+                        text = if (isArabic) "الصغرى (Min)" else "Base Base (Min)",
+                        color = Color(0xFF94A3B8),
+                        fontSize = 9.sp
+                    )
+                    Text(
+                        text = "%.3f".format(minVal),
+                        color = Color(0xFFF59E0B),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(110.dp)
+                .background(Color(0xFF070B14), RoundedCornerShape(8.dp))
+                .border(BorderStroke(1.dp, Color(0x12FFFFFF)), RoundedCornerShape(8.dp))
+                .padding(horizontal = 8.dp, vertical = 12.dp)
+        ) {
+            val scrollState = rememberScrollState()
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .horizontalScroll(scrollState),
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                verticalAlignment = Alignment.Bottom
+            ) {
+                fingerprint.forEachIndexed { sIndex, value ->
+                    val heightFactor = (((value - minVal) / range).toFloat()).coerceIn(0.12f, 1.0f)
+                    val isHovered = hoveredIndex == sIndex
+
+                    Box(
+                        modifier = Modifier
+                            .width(8.dp)
+                            .fillMaxHeight(heightFactor)
+                            .background(
+                                Brush.verticalGradient(
+                                    colors = if (isHovered) listOf(Color(0xFFFBBF24), Color(0xFFF59E0B))
+                                    else listOf(Color(0xFFC084FC), Color(0xFF6366F1))
+                                ),
+                                RoundedCornerShape(topStart = 2.dp, topEnd = 2.dp)
+                            )
+                            .clickable { hoveredIndex = sIndex }
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        val activeIndex = hoveredIndex ?: 0
+        val activeVal = fingerprint.getOrElse(activeIndex) { 0.0 }
+        val verses = if (activeIndex in 0..113) MatrixHelper.SURAH_VERSES[activeIndex] else 0
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color(0x0FFFFFFF), RoundedCornerShape(8.dp))
+                .padding(vertical = 6.dp, horizontal = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = if (isArabic) "سورة ${activeIndex + 1} ($verses آية)" else "Surah ${activeIndex + 1} ($verses Verses)",
+                color = Color(0xFFE2E8F0),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = "E_${activeIndex + 1} = %.4f".format(activeVal),
+                color = Color(0xFFA5B4FC),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace
+            )
+        }
+    }
+}
+
+@Composable
+fun AdvancedFactoringTracker(
+    nStr: String,
+    deltaN: BigInteger,
+    gResult: BigInteger,
+    isArabic: Boolean
+) {
+    val n = try { BigInteger(nStr.trim().filter { it.isDigit() }) } catch(e: Exception) { BigInteger.ZERO }
+    val isFactorSuccessful = gResult > BigInteger.ONE && gResult < n
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color(0x0AFFFFFF), RoundedCornerShape(12.dp))
+            .border(BorderStroke(1.dp, Color(0x15FFFFFF)), RoundedCornerShape(12.dp))
+            .padding(12.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = if (isArabic) "خوارزمية التحليل المتقدم للعامليات" else "Advanced Factoring Algorithm",
+                color = Color(0xFFF59E0B),
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Box(
+                modifier = Modifier
+                    .background(Color(0x1AA7F3D0), RoundedCornerShape(6.dp))
+                    .padding(horizontal = 6.dp, vertical = 2.dp)
+            ) {
                 Text(
-                    text = tab.third,
-                    color = if (isSelected) Color(0xFF818CF8) else Color(0xFF64748B),
-                    fontSize = 10.sp,
+                    text = "A(N) Model",
+                    color = Color(0xFF34D399),
+                    fontSize = 9.sp,
                     fontWeight = FontWeight.Bold
                 )
+            }
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = if (isArabic) "بناء مصفوفة A(N) بالمعادلة أدناه وحساب المحدد ثم إيجاد القاسم المشترك الأكبر."
+                   else "Constructing A(N) sum, computing Delta(N) Bareiss determinant, and gcd intersection.",
+            color = Color(0xFF94A3B8),
+            fontSize = 11.sp
+        )
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color(0x08FFFFFF), RoundedCornerShape(8.dp))
+                .padding(8.dp)
+        ) {
+            Column {
+                Text(
+                    text = if (isArabic) "1. بناء المصفوفة التجميعية A(N):" else "1. Construct Matrix A(N):",
+                    color = Color(0xFFC7D2FE),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "A(N) = \u2211_{s=1}^{114} (N mod s) \u00d7 M_s",
+                    color = Color(0xFFF59E0B),
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color(0x08FFFFFF), RoundedCornerShape(8.dp))
+                .padding(8.dp)
+        ) {
+            Column {
+                Text(
+                    text = if (isArabic) "2. محدد المصفوفة التجميعية \u0394(N):" else "2. Determinant calculation \u0394(N) = det(A(N)):",
+                    color = Color(0xFFC7D2FE),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                val detStr = deltaN.toString()
+                val truncatedDet = if (detStr.length > 24) {
+                    detStr.take(12) + "..." + detStr.takeLast(12) + " (${detStr.length} digits)"
+                } else {
+                    detStr
+                }
+                Text(
+                    text = "\u0394(N) = $truncatedDet",
+                    color = Color.White,
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color(0x08FFFFFF), RoundedCornerShape(8.dp))
+                .padding(8.dp)
+        ) {
+            Column {
+                Text(
+                    text = if (isArabic) "3. القاسم المشترك الأكبر للربط الحسابي:" else "3. Greatest Common Divisor g = gcd(\u0394(N), N):",
+                    color = Color(0xFFC7D2FE),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "g = gcd(\u0394(N), N) = $gResult",
+                    color = if (isFactorSuccessful) Color(0xFF34D399) else Color(0xFF94A3B8),
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+            }
+        }
+
+        if (isFactorSuccessful) {
+            Spacer(modifier = Modifier.height(10.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0x1A34D399), RoundedCornerShape(8.dp))
+                    .border(BorderStroke(1.dp, Color(0x3334D399)), RoundedCornerShape(8.dp))
+                    .padding(8.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Check,
+                        contentDescription = "Success",
+                        tint = Color(0xFF34D399),
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = if (isArabic) "نجاح مذهل: اكتشاف القاسم المشترك g = $gResult كأحد عوامل N غير البديهية!"
+                               else "Successful factorization! Found non-trivial factor g = $gResult!",
+                        color = Color(0xFF34D399),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        } else {
+            Spacer(modifier = Modifier.height(10.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0x0AFFFFFF), RoundedCornerShape(8.dp))
+                    .padding(8.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Info,
+                        contentDescription = "Info",
+                        tint = Color(0xFF94A3B8),
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = if (isArabic) "القاسم g لا يعطي عاملاً غير بديهي (g=1 أو N). هذا يعد مؤشراً قوياً على أن N عدد أولي أو مرشح أولي متماسك."
+                               else "g is trivial (1 or N) indicating that N behaves as a robust prime candidate.",
+                        color = Color(0xFF94A3B8),
+                        fontSize = 10.sp
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun RankReductionTestTracker(
+    results: List<RankReductionTestResult>,
+    isArabic: Boolean
+) {
+    if (results.isEmpty()) return
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color(0x0AFFFFFF), RoundedCornerShape(12.dp))
+            .border(BorderStroke(1.dp, Color(0x15FFFFFF)), RoundedCornerShape(12.dp))
+            .padding(12.dp)
+    ) {
+        Text(
+            text = if (isArabic) "اختبار تناقص الرتب المصفوفي للأعداد الأولية" else "Modular Rank Reduction Primality Test",
+            color = Color(0xFFC084FC),
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = if (isArabic) "دراسة تناقص رتبة مصفوفات سور القرآن modulo p. تناقص الرتبة لـ p القاسم يؤكد كونه عاملاً لـ N."
+                   else "Investigates matrix rank drops. A drop below 28 when p divides N indicates key mathematical alignments.",
+            color = Color(0xFF94A3B8),
+            fontSize = 11.sp
+        )
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        Column(
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            results.forEach { res ->
+                val cardColor = if (res.isFlagged) Color(0x1D34D399) else Color(0x07FFFFFF)
+                val borderColor = if (res.isFlagged) Color(0x5534D399) else Color(0x10FFFFFF)
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(cardColor, RoundedCornerShape(8.dp))
+                        .border(BorderStroke(1.dp, borderColor), RoundedCornerShape(8.dp))
+                        .padding(10.dp)
+                ) {
+                    Column {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Prime p = ${res.prime}",
+                                color = if (res.isFlagged) Color(0xFF34D399) else Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace
+                            )
+                            if (res.dividesN) {
+                                Box(
+                                    modifier = Modifier
+                                        .background(Color(0xFF34D399), RoundedCornerShape(4.dp))
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = if (isArabic) "يقسم N" else "Divides N",
+                                        color = Color.Black,
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            } else {
+                                Box(
+                                    modifier = Modifier
+                                        .background(Color(0x14FFFFFF), RoundedCornerShape(4.dp))
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = if (isArabic) "لا يقسم N" else "Does not divide N",
+                                        color = Color(0xFF94A3B8),
+                                        fontSize = 9.sp
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = if (isArabic) "متوسط معامل الرتبة mod p:" else "Average Matrix Rank mod p:",
+                                color = Color(0xFF94A3B8),
+                                fontSize = 11.sp
+                            )
+                            Text(
+                                text = "%.4f / 28".format(res.averageRank),
+                                color = if (res.averageRank < 27.8) Color(0xFFFBBF24) else Color.White,
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = if (isArabic) "مصفوفات شهدت تناقصاً بالأبعاد (< 28):" else "Matrices with rank drop (< 28):",
+                                color = Color(0xFF94A3B8),
+                                fontSize = 11.sp
+                            )
+                            Text(
+                                text = "${res.rankDropsCount} / 114",
+                                color = if (res.rankDropsCount > 0) Color(0xFFFBBF24) else Color.White,
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        if (res.isFlagged) {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = if (isArabic) "✨ انخفاض الرتبة يؤكد أن العامل p عامل مفكك حقيقي لـ N طيفياً!"
+                                       else "✨ Significant rank drop matches factor p dividing N!",
+                                color = Color(0xFF34D399),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
             }
         }
     }

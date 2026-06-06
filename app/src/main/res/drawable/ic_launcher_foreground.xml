@@ -1,8 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
-<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item
-        android:width="66dp"
-        android:height="66dp"
-        android:drawable="@drawable/app_logo_1780663776790"
-        android:gravity="center" />
-</layer-list>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#ffffff"
+        android:strokeColor="#C084FC"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:pathData="M 54 24 L 80 74 L 28 74 Z" />
+    <path
+        android:fillColor="#C084FC"
+        android:pathData="M 54 44 A 6 6 0 1 1 53.99 44 Z" />
+</vector>

@@ -1,6 +1,6 @@
 {
-  "name": "Prime Factorizer",
-  "description": "Factorizes numbers using matrix spectral footprints from the Quranic matrices.",
+  "name": "Spectral Factorizer",
+  "description": "Factorizes numbers using matrix spectral footprints from 114 Quranic matrices.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
