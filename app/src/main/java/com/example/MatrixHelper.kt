@@ -12,6 +12,23 @@ class RankReductionTestResult(
     val ranks: List<Int>
 )
 
+class PollardBrentStep(
+    val step: Int,
+    val x: BigInteger,
+    val surah: Int,
+    val row: Int,
+    val col: Int,
+    val matrixValue: Int,
+    val gcdValue: BigInteger
+)
+
+class QuranicPollardBrentResult(
+    val factor: BigInteger,
+    val steps: List<PollardBrentStep>,
+    val totalSteps: Int,
+    val isSuccess: Boolean
+)
+
 class SpectralResult(
     val gN: BigInteger,
     val gNFactors: List<BigInteger>,
@@ -425,5 +442,118 @@ object MatrixHelper {
             fingerprint.add(Math.sqrt(sumSq))
         }
         return fingerprint
+    }
+
+    fun quranicNext(currX: BigInteger, n: BigInteger): Pair<BigInteger, Triple<Int, Int, Int>> {
+        val currLong = currX.mod(BigInteger.valueOf(1000000007L)).toLong()
+        val s = ((Math.abs(currLong) % 114) + 1).toInt()
+        val m_s = generateQuranicMatrix(s)
+        val row = (Math.abs(currLong) % 28).toInt()
+        val col = ((Math.abs(currLong) * 17) % 28).toInt()
+        val matrixValue = m_s[row][col]
+        val nextX = currX.multiply(currX)
+            .add(BigInteger.valueOf(matrixValue.toLong()))
+            .add(BigInteger.ONE)
+            .mod(n)
+        return Pair(nextX, Triple(s, row, col))
+    }
+
+    fun runQuranicPollardBrent(n: BigInteger, maxSteps: Int = 1000): QuranicPollardBrentResult {
+        val stepsList = mutableListOf<PollardBrentStep>()
+        if (n <= BigInteger.ONE) {
+            return QuranicPollardBrentResult(BigInteger.ONE, emptyList(), 0, false)
+        }
+        if (n.mod(BigInteger.valueOf(2)) == BigInteger.ZERO) {
+            return QuranicPollardBrentResult(
+                BigInteger.valueOf(2), 
+                listOf(PollardBrentStep(1, BigInteger.valueOf(2), 1, 0, 0, 0, BigInteger.valueOf(2))), 
+                1, 
+                true
+            )
+        }
+
+        var x = BigInteger.valueOf(2)
+        var y = BigInteger.valueOf(2)
+        var r = 1L
+        var q = BigInteger.ONE
+        var g = BigInteger.ONE
+        var ys = BigInteger.valueOf(2)
+        var stepCount = 0
+        val mLimit = 100L
+
+        while (g == BigInteger.ONE && stepCount < maxSteps) {
+            x = y
+            for (i in 1..r) {
+                val (nextY, _) = quranicNext(y, n)
+                y = nextY
+            }
+
+            var k = 0L
+            while (k < r && g == BigInteger.ONE && stepCount < maxSteps) {
+                ys = y
+                val limit = Math.min(mLimit, r - k)
+                for (i in 1..limit) {
+                    val (nextY, info) = quranicNext(y, n)
+                    y = nextY
+                    val diff = x.subtract(y).abs()
+                    q = q.multiply(diff).mod(n)
+
+                    stepCount++
+                    if (stepCount <= 30) {
+                        val testGcd = diff.gcd(n)
+                        val m_s = generateQuranicMatrix(info.first)
+                        stepsList.add(
+                            PollardBrentStep(
+                                step = stepCount,
+                                x = y,
+                                surah = info.first,
+                                row = info.second,
+                                col = info.third,
+                                matrixValue = m_s[info.second][info.third],
+                                gcdValue = testGcd
+                            )
+                        )
+                    }
+                }
+                g = q.gcd(n)
+                k += limit
+            }
+            r *= 2
+        }
+
+        if (g == n) {
+            g = BigInteger.ONE
+            y = ys
+            while (g == BigInteger.ONE && stepCount < maxSteps) {
+                val (nextY, info) = quranicNext(y, n)
+                y = nextY
+                val diff = x.subtract(y).abs()
+                g = diff.gcd(n)
+                stepCount++
+                if (stepCount <= 30) {
+                    val m_s = generateQuranicMatrix(info.first)
+                    stepsList.add(
+                        PollardBrentStep(
+                            step = stepCount,
+                            x = y,
+                            surah = info.first,
+                            row = info.second,
+                            col = info.third,
+                            matrixValue = m_s[info.second][info.third],
+                            gcdValue = g
+                        )
+                    )
+                }
+            }
+        }
+
+        val isSuccess = g > BigInteger.ONE && g < n
+
+        return QuranicPollardBrentResult(
+            factor = if (isSuccess) g else BigInteger.ONE,
+            steps = stepsList,
+            totalSteps = stepCount,
+            isSuccess = isSuccess
+        )
     }
 }

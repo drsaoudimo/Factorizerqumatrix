@@ -51,6 +51,7 @@ class FactorizerViewModel : ViewModel() {
     var customPrimesText by mutableStateOf("19, 113, 239")
     var isAnalyzing by mutableStateOf(false)
     var spectralResult by mutableStateOf<SpectralResult?>(null)
+    var pollardBrentResult by mutableStateOf<QuranicPollardBrentResult?>(null)
     var activeTab by mutableStateOf("analyze") // analyze, matrices, history, info
     
     // History log of analyzed values N and their discovered factors
@@ -98,9 +99,11 @@ class FactorizerViewModel : ViewModel() {
             }
 
             val res = MatrixHelper.factorizeSpectral(n, emptyMap(), customPrimes)
+            val qpbRes = MatrixHelper.runQuranicPollardBrent(n)
             
             withContext(Dispatchers.Main) {
                 spectralResult = res
+                pollardBrentResult = qpbRes
                 isAnalyzing = false
                 
                 // Add to history if not duplicate
@@ -473,6 +476,14 @@ fun AnalyzeTab(viewModel: FactorizerViewModel, isArabic: Boolean) {
             item {
                 RankReductionTestTracker(
                     results = result.rankReductionResults,
+                    isArabic = isArabic
+                )
+            }
+
+            // Quranic Guided Pollard's Rho Brent Algorithm
+            item {
+                QuranicPollardBrentTracker(
+                    result = viewModel.pollardBrentResult,
                     isArabic = isArabic
                 )
             }
@@ -1474,6 +1485,229 @@ fun RankReductionTestTracker(
                                 fontWeight = FontWeight.Bold
                             )
                         }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun QuranicPollardBrentTracker(
+    result: QuranicPollardBrentResult?,
+    isArabic: Boolean
+) {
+    if (result == null) return
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color(0x0AFFFFFF), RoundedCornerShape(12.dp))
+            .border(BorderStroke(1.dp, Color(0x15FFFFFF)), RoundedCornerShape(12.dp))
+            .padding(12.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = if (isArabic) "خوارزمية بولارد-برنت الموجهة برياضيات القرآن" else "Quranic-Guided Pollard-Brent Algorithm",
+                color = Color(0xFFC084FC),
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Box(
+                modifier = Modifier
+                    .background(if (result.isSuccess) Color(0x1A34D399) else Color(0x1AF59E0B), RoundedCornerShape(6.dp))
+                    .padding(horizontal = 6.dp, vertical = 2.dp)
+            ) {
+                Text(
+                    text = if (result.isSuccess) (if (isArabic) "ناجح" else "Success") else (if (isArabic) "مرشح أولي" else "Prime Candidate"),
+                    color = if (result.isSuccess) Color(0xFF34D399) else Color(0xFFF59E0B),
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = if (isArabic) "توجيه خطوة بولارد العشوائية x_next = (x^2 + M_s[row,col] + 1) mod N باستخدام مصفوفات سور القرآن الـ 114."
+                   else "Guiding Pollard's step function x_next = (x^2 + M_s[row,col] + 1) mod N deterministically using entries from the 114 Quranic matrices.",
+            color = Color(0xFF94A3B8),
+            fontSize = 11.sp,
+            lineHeight = 15.sp
+        )
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // Equation display
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color(0x08FFFFFF), RoundedCornerShape(8.dp))
+                .padding(8.dp)
+        ) {
+            Column {
+                Text(
+                    text = if (isArabic) "دالة النقل الموجهة بالمصفوفة القرآنية M_s:" else "Quranic Matrix-Guided Transition Function:",
+                    color = Color(0xFFC7D2FE),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "x_{i+1} = (x_i^2 + M_s[row][col] + 1) mod N",
+                    color = Color(0xFFC084FC),
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+                Text(
+                    text = "s = (x_i mod 114) + 1,  row = x_i mod 28,  col = (x_i * 17) mod 28",
+                    color = Color(0xFF94A3B8),
+                    fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.padding(top = 1.dp)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // Stats Row
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .background(Color(0x0FFFFFFF), RoundedCornerShape(8.dp))
+                    .padding(8.dp)
+            ) {
+                Column {
+                    Text(
+                        text = if (isArabic) "الخطوات الكلية" else "Total Steps",
+                        color = Color(0xFF94A3B8),
+                        fontSize = 9.sp
+                    )
+                    Text(
+                        text = "${result.totalSteps}",
+                        color = Color.White,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+            }
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .background(Color(0x0FFFFFFF), RoundedCornerShape(8.dp))
+                    .padding(8.dp)
+            ) {
+                Column {
+                    Text(
+                        text = if (isArabic) "العامل المفتش g" else "Discovered Factor g",
+                        color = Color(0xFF94A3B8),
+                        fontSize = 9.sp
+                    )
+                    Text(
+                        text = if (result.isSuccess) result.factor.toString() else (if (isArabic) "لا يوجد" else "None"),
+                        color = if (result.isSuccess) Color(0xFF34D399) else Color(0xFF94A3B8),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+            }
+        }
+
+        if (result.steps.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = if (isArabic) "سجل الخطوات الـ 30 الأولى بالتفصيل:" else "First 30 Guided Step Iterations:",
+                color = Color.White,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 240.dp)
+                    .border(BorderStroke(1.dp, Color(0x10FFFFFF)), RoundedCornerShape(8.dp))
+                    .background(Color(0xFF070B14))
+            ) {
+                val scrollState = rememberScrollState()
+                Column(
+                    modifier = Modifier
+                        .verticalScroll(scrollState)
+                        .padding(6.dp)
+                ) {
+                    // Header Row
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0x14FFFFFF), RoundedCornerShape(4.dp))
+                            .padding(vertical = 4.dp, horizontal = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("Step", color = Color(0xFF94A3B8), fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(35.dp))
+                        Text("Surah / [R][C]", color = Color(0xFF94A3B8), fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(90.dp))
+                        Text("M_s[R,C]", color = Color(0xFF94A3B8), fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(45.dp), textAlign = TextAlign.Center)
+                        Text("gcd(diff, N)", color = Color(0xFF94A3B8), fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), textAlign = TextAlign.End)
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    result.steps.forEach { step ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 3.dp, horizontal = 6.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "#${step.step}",
+                                color = Color(0xFFA5B4FC),
+                                fontSize = 9.sp,
+                                fontFamily = FontFamily.Monospace,
+                                modifier = Modifier.width(35.dp)
+                            )
+                            Text(
+                                text = "S.${step.surah} [${step.row}][${step.col}]",
+                                color = Color.White,
+                                fontSize = 9.sp,
+                                fontFamily = FontFamily.Monospace,
+                                modifier = Modifier.width(90.dp)
+                            )
+                            Text(
+                                text = "${step.matrixValue}",
+                                color = Color(0xFFFBBF24),
+                                fontSize = 9.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.width(45.dp),
+                                textAlign = TextAlign.Center
+                            )
+                            
+                            val gcdStr = step.gcdValue.toString()
+                            val hasMatch = step.gcdValue > BigInteger.ONE
+                            Text(
+                                text = if (gcdStr.length > 12) gcdStr.take(10) + "..." else gcdStr,
+                                color = if (hasMatch) Color(0xFF34D399) else Color(0xFF94A3B8),
+                                fontSize = 9.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = if (hasMatch) FontWeight.Bold else FontWeight.Normal,
+                                modifier = Modifier.weight(1f),
+                                textAlign = TextAlign.End
+                            )
+                        }
+                        Divider(color = Color(0x08FFFFFF), thickness = 0.5.dp)
                     }
                 }
             }
