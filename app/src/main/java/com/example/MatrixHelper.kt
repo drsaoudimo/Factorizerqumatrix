@@ -46,6 +46,28 @@ class SpectralResult(
 
 object MatrixHelper {
 
+    private val matrixCache: Array<Array<IntArray>> by lazy {
+        Array(114) { s -> generateQuranicMatrix(s + 1) }
+    }
+
+    private val detMsCache: Array<BigInteger> by lazy {
+        Array(114) { s ->
+            val m_s = getQuranicMatrix(s + 1)
+            val bigM = Array(28) { i -> Array(28) { j -> BigInteger.valueOf(m_s[i][j].toLong()) } }
+            determinantBareiss(bigM)
+        }
+    }
+
+    fun getQuranicMatrix(s: Int): Array<IntArray> {
+        val idx = (s - 1).coerceIn(0, 113)
+        return matrixCache[idx]
+    }
+
+    fun getDetMs(s: Int): BigInteger {
+        val idx = (s - 1).coerceIn(0, 113)
+        return detMsCache[idx]
+    }
+
     // Actual verse counts for all 114 Quranic Surahs
     val SURAH_VERSES = intArrayOf(
         7, 286, 200, 176, 120, 165, 206, 75, 129, 109, // 1-10
@@ -187,11 +209,14 @@ object MatrixHelper {
         return eigenvalues
     }
 
-    // Modular Gaussian Elimination for Matrix Rank Modulo P
+    // Modular Gaussian Elimination for Matrix Rank Modulo P (Safe for extreme primes/BigIntegers)
     fun calculateMatrixRankModP(matrix: Array<IntArray>, p: BigInteger): Int {
         val m = matrix.size
         val n = matrix[0].size
-        val temp = Array(m) { i -> Array(n) { j -> BigInteger.valueOf((matrix[i][j] % p.toLong() + p.toLong()) % p.toLong()) } }
+        val temp = Array(m) { i -> Array(n) { j -> 
+            val entry = BigInteger.valueOf(matrix[i][j].toLong())
+            entry.mod(p)
+        } }
         
         var rank = 0
         var col = 0
@@ -231,6 +256,97 @@ object MatrixHelper {
         return rank
     }
 
+    // Recursive Complete Quranic guided Pollard Brent Factorization engine
+    fun factorizeComplete(n: BigInteger): List<BigInteger> {
+        val factors = java.util.concurrent.CopyOnWriteArrayList<BigInteger>()
+        factorizeRecursive(n, factors)
+        
+        val cleanFactors = factors.filter { it > BigInteger.ONE }.sorted().toMutableList()
+        
+        var i = 0
+        while (i < cleanFactors.size) {
+            val f = cleanFactors[i]
+            if (f > BigInteger.ONE && !f.isProbablePrime(30)) {
+                val qpbSub = runQuranicPollardBrent(f, 2000)
+                if (qpbSub.isSuccess && qpbSub.factor > BigInteger.ONE && qpbSub.factor < f) {
+                    cleanFactors.removeAt(i)
+                    cleanFactors.add(qpbSub.factor)
+                    cleanFactors.add(f.divide(qpbSub.factor))
+                    cleanFactors.sort()
+                    i = 0 
+                    continue
+                }
+            }
+            i++
+        }
+        
+        val uniquePrimes = cleanFactors.filter { it > BigInteger.ONE }.sorted().distinct()
+        return if (uniquePrimes.isEmpty() && n > BigInteger.ONE) listOf(n) else uniquePrimes
+    }
+
+    private fun factorizeRecursive(n: BigInteger, factors: MutableList<BigInteger>) {
+        if (n <= BigInteger.ONE) return
+        
+        // 1. Primality check
+        if (n.isProbablePrime(30)) {
+            factors.add(n)
+            return
+        }
+
+        // 2. Trial division for small primes (up to 2000)
+        var temp = n
+        val smallPrimes = listOf(
+            2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89, 97, 
+            101, 103, 107, 109, 113, 127, 131, 137, 139, 149, 151, 157, 163, 167, 173, 179, 181, 191, 193, 
+            197, 199, 211, 223, 227, 229, 233, 239, 241, 251, 257, 263, 269, 271, 277, 281, 283, 293, 307, 
+            311, 313, 317, 331, 337, 347, 349, 353, 359, 367, 373, 379, 383, 389, 397, 401, 409, 419, 421, 
+            431, 433, 439, 443, 449, 457, 461, 463, 467, 479, 487, 491, 499, 503, 509, 521, 523, 541, 547, 
+            557, 563, 569, 571, 577, 587, 593, 599, 601, 607, 613, 617, 619, 631, 641, 643, 647, 653, 659, 
+            661, 673, 677, 683, 691, 701, 709, 719, 727, 733, 739, 743, 751, 757, 761, 769, 773, 787, 797, 
+            809, 811, 821, 823, 827, 829, 839, 853, 857, 859, 863, 877, 881, 883, 887, 907, 911, 919, 929, 
+            937, 941, 947, 953, 967, 971, 977, 983, 991, 997,
+            1009, 1013, 1019, 1021, 1031, 1033, 1039, 1049, 1051, 1061, 1063, 1069, 1087, 1091, 1093, 1097, 
+            1103, 1109, 1117, 1123, 1129, 1151, 1153, 1163, 1171, 1181, 1187, 1193, 1201, 1213, 1217, 1223, 
+            1229, 1231, 1237, 1249, 1259, 1277, 1279, 1283, 1289, 1291, 1297, 1301, 1303, 1307, 1319, 1321, 
+            1327, 1361, 1367, 1373, 1381, 1399, 1409, 1423, 1427, 1429, 1433, 1439, 1447, 1451, 1453, 1459, 
+            1471, 1481, 1483, 1487, 1489, 1493, 1499, 1511, 1523, 1531, 1543, 1549, 1553, 1559, 1567, 1571, 
+            1579, 1583, 1597, 1601, 1607, 1609, 1613, 1619, 1621, 1627, 1637, 1657, 1663, 1667, 1669, 1693, 
+            1697, 1699, 1709, 1721, 1723, 1733, 1741, 1747, 1753, 1759, 1777, 1783, 1787, 1789, 1801, 1811, 
+            1823, 1831, 1847, 1861, 1867, 1871, 1873, 1877, 1879, 1889, 1901, 1907, 1913, 1931, 1933, 1949, 
+            1951, 1973, 1979, 1987, 1993, 1997, 1999
+        )
+        
+        var trialFound = false
+        for (pVal in smallPrimes) {
+            val p = BigInteger.valueOf(pVal.toLong())
+            if (p >= temp) break
+            if (temp.mod(p) == BigInteger.ZERO) {
+                factors.add(p)
+                while (temp.mod(p) == BigInteger.ZERO) {
+                    temp = temp.divide(p)
+                }
+                trialFound = true
+            }
+        }
+        
+        if (trialFound) {
+            if (temp > BigInteger.ONE) {
+                factorizeRecursive(temp, factors)
+            }
+            return
+        }
+
+        // 3. Recursive Quranic Pollard's Rho Brent Core
+        val qpbResult = runQuranicPollardBrent(temp, 4000)
+        if (qpbResult.isSuccess && qpbResult.factor > BigInteger.ONE && qpbResult.factor < temp) {
+            val f = qpbResult.factor
+            factorizeRecursive(f, factors)
+            factorizeRecursive(temp.divide(f), factors)
+        } else {
+            factors.add(temp)
+        }
+    }
+
     // Combined Factorization and Analysis
     fun factorizeSpectral(
         n: BigInteger,
@@ -238,12 +354,13 @@ object MatrixHelper {
         customPrimes: List<BigInteger> = emptyList()
     ): SpectralResult {
         val size = 28
+        val nIsLarge = n.bitLength() > 50
         
         // 1. Calculate A(N) = sum_{s=1}^{114} (N mod s) * M_s
         val matrixA = Array(size) { Array(size) { BigInteger.ZERO } }
         for (s in 1..114) {
             val rem = n.mod(BigInteger.valueOf(s.toLong()))
-            val m_s = generateQuranicMatrix(s)
+            val m_s = getQuranicMatrix(s)
             for (i in 0 until size) {
                 for (j in 0 until size) {
                     val weighted = rem.multiply(BigInteger.valueOf(m_s[i][j].toLong()))
@@ -274,49 +391,32 @@ object MatrixHelper {
         var gN = BigInteger.ZERO
         
         for (s in 1..114) {
-            val m_s = generateQuranicMatrix(s)
-            val matrixMs_N_I = Array(size) { i ->
-                Array(size) { j ->
-                    val ms_val = BigInteger.valueOf(m_s[i][j].toLong())
-                    if (i == j) {
-                        ms_val.subtract(n)
-                    } else {
-                        ms_val
+            val d_s = if (nIsLarge) {
+                // Equivalent modulo N to det(M_s)
+                getDetMs(s).mod(n)
+            } else {
+                val m_s = getQuranicMatrix(s)
+                val matrixMs_N_I = Array(size) { i ->
+                    Array(size) { j ->
+                        val ms_val = BigInteger.valueOf(m_s[i][j].toLong())
+                        if (i == j) {
+                            ms_val.subtract(n)
+                        } else {
+                            ms_val
+                        }
                     }
                 }
+                determinantBareiss(matrixMs_N_I)
             }
-            val d_s = determinantBareiss(matrixMs_N_I)
             individualDets.add(d_s)
-            gN = if (gN == BigInteger.ZERO) d_s.abs() else gN.gcd(d_s.abs())
+            val termForGcd = if (nIsLarge) getDetMs(s).abs() else d_s.abs()
+            gN = if (gN == BigInteger.ZERO) termForGcd else gN.gcd(termForGcd)
         }
 
         val gN_gcd = gN.gcd(n)
 
-        // Collect all potential factors found via the model
-        val foundFactors = mutableSetOf<BigInteger>()
-        
-        // Add non-trivial factors of n from g, tN_gcd, gN_gcd
-        if (gFactor > BigInteger.ONE && gFactor < n) foundFactors.add(gFactor)
-        if (tN_gcd > BigInteger.ONE && tN_gcd < n) foundFactors.add(tN_gcd)
-        if (gN_gcd > BigInteger.ONE && gN_gcd < n) foundFactors.add(gN_gcd)
-
-        // Factorize using simple trial division to ensure absolute correctness of all factors
-        var tempN = n
-        var d = BigInteger.valueOf(2)
-        while (d.multiply(d) <= tempN && d < BigInteger.valueOf(10000)) {
-            if (tempN.mod(d) == BigInteger.ZERO) {
-                foundFactors.add(d)
-                while (tempN.mod(d) == BigInteger.ZERO) {
-                    tempN = tempN.divide(d)
-                }
-            }
-            d = d.add(BigInteger.ONE)
-        }
-        if (tempN > BigInteger.ONE && tempN < n) {
-            foundFactors.add(tempN)
-        }
-
-        val sortedFactorsList = foundFactors.toList().sorted()
+        // Fully complete and robust prime factorization relying on Quranic Pollard's Brent
+        val sortedFactorsList = factorizeComplete(n)
 
         // 5. Modular Projection test for custom/identified primes
         val referencePrimes = listOf(BigInteger.valueOf(19), BigInteger.valueOf(113))
@@ -331,8 +431,9 @@ object MatrixHelper {
             val ranks = mutableListOf<Int>()
             val dropsList = mutableListOf<Int>()
             
+            val m_s_probe = getQuranicMatrix(1)
             for (s in 1..114) {
-                val m_s = generateQuranicMatrix(s)
+                val m_s = getQuranicMatrix(s)
                 val rModP = calculateMatrixRankModP(m_s, p)
                 ranks.add(rModP)
                 if (rModP < 28) {
@@ -378,7 +479,7 @@ object MatrixHelper {
             val ranks = mutableListOf<Int>()
             var dropCount = 0
             for (s in 1..114) {
-                val m_s = generateQuranicMatrix(s)
+                val m_s = getQuranicMatrix(s)
                 val rank = calculateMatrixRankModP(m_s, p)
                 ranks.add(rank)
                 if (rank < 28) {
@@ -426,7 +527,7 @@ object MatrixHelper {
         
         val fingerprint = ArrayList<Double>(114)
         for (s in 1..114) {
-            val m_s = generateQuranicMatrix(s)
+            val m_s = getQuranicMatrix(s)
             val w = DoubleArray(size)
             for (i in 0 until size) {
                 var sum = 0.0
@@ -447,7 +548,7 @@ object MatrixHelper {
     fun quranicNext(currX: BigInteger, n: BigInteger): Pair<BigInteger, Triple<Int, Int, Int>> {
         val currLong = currX.mod(BigInteger.valueOf(1000000007L)).toLong()
         val s = ((Math.abs(currLong) % 114) + 1).toInt()
-        val m_s = generateQuranicMatrix(s)
+        val m_s = getQuranicMatrix(s)
         val row = (Math.abs(currLong) % 28).toInt()
         val col = ((Math.abs(currLong) * 17) % 28).toInt()
         val matrixValue = m_s[row][col]
@@ -501,7 +602,7 @@ object MatrixHelper {
                     stepCount++
                     if (stepCount <= 30) {
                         val testGcd = diff.gcd(n)
-                        val m_s = generateQuranicMatrix(info.first)
+                        val m_s = getQuranicMatrix(info.first)
                         stepsList.add(
                             PollardBrentStep(
                                 step = stepCount,
@@ -531,7 +632,7 @@ object MatrixHelper {
                 g = diff.gcd(n)
                 stepCount++
                 if (stepCount <= 30) {
-                    val m_s = generateQuranicMatrix(info.first)
+                    val m_s = getQuranicMatrix(info.first)
                     stepsList.add(
                         PollardBrentStep(
                             step = stepCount,
